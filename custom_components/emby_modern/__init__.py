@@ -39,16 +39,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data[CONF_SSL],
         hass.loop,
         session
-    ) # Fixed: Was missing closing parenthesis
+    )
 
     # 2. Validate Connection
     try:
         await client.validate_connection()
     except (CannotConnect, TimeoutError) as err:
-        # Raise NotReady so HA retries setup later (good for reboots)
         raise ConfigEntryNotReady(f"Emby not ready: {err}") from err
     except InvalidAuth as err:
-        # If auth fails, we should return False so HA shows a config error
         _LOGGER.error(f"Authentication failed: {err}")
         return False
     except Exception as err:
@@ -57,15 +55,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # 3. Setup Coordinator
     coordinator = EmbyDataUpdateCoordinator(hass, client, entry)
-
-    # Fetch initial data so we don't start with empty sensors
     await coordinator.async_config_entry_first_refresh()
 
     # 4. Store references
-    # New HA standard: Store coordinator in entry.runtime_data
     entry.runtime_data = coordinator
-    
-    # Legacy/Safe fallback: Store in hass.data as well
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     # 5. Register the Main Device (The Server itself)
@@ -75,8 +68,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     device_registry = dr.async_get(hass)
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
-        # IMPORTANT: Use the Unique ID (server UUID) if you set it in config_flow.
-        # Otherwise, falling back to entry_id is safe but less robust if you re-install.
         identifiers={(DOMAIN, entry.entry_id)},
         manufacturer="Emby",
         name=server_name,
@@ -94,8 +85,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        # Clean up hass.data
         if entry.entry_id in hass.data[DOMAIN]:
             hass.data[DOMAIN].pop(entry.entry_id)
             
     return unload_ok
+
+# --- NEW HOOK FOR DELETION ---
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Remove a config entry from a device."""
+    # Return True to allow the device to be removed from the registry
+    return True
