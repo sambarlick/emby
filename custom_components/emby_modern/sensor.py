@@ -8,8 +8,11 @@ from .entity import EmbyEntity
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddConfigEntryEntitiesCallback) -> None:
     coordinator = entry.runtime_data
     entities = []
+    
+    # 1. Add the Active Streams Sensor
     entities.append(EmbyActiveStreamsSensor(coordinator))
     
+    # 2. Add a Sensor for every Library found
     libraries = coordinator.data.get("libraries", [])
     for lib in libraries:
         entities.append(EmbyLibrarySensor(coordinator, lib))
@@ -17,12 +20,13 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddC
     async_add_entities(entities)
 
 class EmbyActiveStreamsSensor(EmbyEntity, SensorEntity):
+    """Sensor to track active streams."""
+    
     def __init__(self, coordinator):
         ver = coordinator.data.get("system_info", {}).get("Version", "Unknown")
         super().__init__(
             coordinator, 
-            coordinator.entry.entry_id, 
-            coordinator.client.get_server_name(),
+            device_id=None, # Use default (Server ID)
             client_name="Emby Server", 
             version=ver
         )
@@ -62,12 +66,13 @@ class EmbyActiveStreamsSensor(EmbyEntity, SensorEntity):
         return {"active_streams": streams}
 
 class EmbyLibrarySensor(EmbyEntity, SensorEntity):
+    """Sensor to track library items."""
+
     def __init__(self, coordinator, lib_data):
         ver = coordinator.data.get("system_info", {}).get("Version", "Unknown")
         super().__init__(
             coordinator, 
-            coordinator.entry.entry_id, 
-            coordinator.client.get_server_name(),
+            device_id=None, # Use default (Server ID)
             client_name="Emby Server", 
             version=ver
         )
@@ -76,7 +81,7 @@ class EmbyLibrarySensor(EmbyEntity, SensorEntity):
         self._lib_type = lib_data["Type"]
         self._attr_name = self._lib_name
         
-        # FIX: Use the Config Entry Unique ID (The System GUID)
+        # FIX: Use the Config Entry Unique ID + Library ID
         self._attr_unique_id = f"{coordinator.entry.unique_id}-library-{self._lib_id}"
         self._attr_native_unit_of_measurement = "items"
         self._attr_state_class = SensorStateClass.TOTAL
@@ -101,7 +106,7 @@ class EmbyLibrarySensor(EmbyEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        """Return simple formatted attributes (Title (Year))."""
+        """Return attributes. TV: Episode -> Show. Movies: Title -> Year."""
         libraries = self.coordinator.data.get("libraries", [])
         attrs = {}
         items = []
@@ -118,7 +123,7 @@ class EmbyLibrarySensor(EmbyEntity, SensorEntity):
             else:
                  return {"status": "No recently added items."}
 
-        # 1. Live TV
+        # 1. Live TV (Keep as Channel -> Program)
         if self._lib_type == "livetv":
             for ch in items:
                 if isinstance(ch, dict):
@@ -126,62 +131,56 @@ class EmbyLibrarySensor(EmbyEntity, SensorEntity):
             return attrs
 
         # 2. Movies & Series processing
-        is_movie_library = "movie" in self._lib_type.lower()
         
         for item in items:
-            left_text = "Unknown"
-            right_text = "" # Default to empty
+            key_text = "Unknown"
+            value_text = ""
 
             # --- If Item is Dict (Ideal) ---
             if isinstance(item, dict):
                 name = item.get("Name", "Unknown")
-                
-                # Capture year data
                 year = item.get("ProductionYear")
-                if year is None:
-                    premiere_date = item.get("PremiereDate", "")
-                    if premiere_date and len(premiere_date) >= 4:
-                        year = premiere_date[:4]
-                year_str = str(year) if year else "Unknown Year"
+                year_str = str(year) if year else ""
 
                 if item.get("Type") == "Episode":
-                    # Format: Series Name (Year) -> SxxExx Episode Title
+                    # --- NEW LOGIC: FLIP IT! ---
+                    # Key:   S04E05 Cold Station 12
+                    # Value: Star Trek: Enterprise
+                    
                     series = item.get("SeriesName", "Unknown Series")
                     s = item.get("ParentIndexNumber")
                     e = item.get("IndexNumber")
                     
-                    left_text = f"{series} ({year_str})" if year and year_str != "Unknown Year" else series
+                    # Construct Key (Episode)
                     if s is not None and e is not None:
-                        right_text = f"S{s:02d}E{e:02d} {name}"
+                        key_text = f"S{s:02d}E{e:02d} {name}"
                     else:
-                        right_text = name
+                        key_text = name
+                        
+                    # Construct Value (Show Name)
+                    value_text = series
+
                 else:
-                    # FIX: Format for Movies: Title -> <empty>
-                    if is_movie_library:
-                        left_text = name 
-                        right_text = "" 
-                    else:
-                        left_text = f"{name} ({year_str})" if year and year_str != "Unknown Year" else name
-                        right_text = item.get("Type", "Media")
+                    # --- MOVIE LOGIC (Keep Standard) ---
+                    # Key:   Deadpool & Wolverine
+                    # Value: 2024
+                    key_text = name
+                    value_text = year_str if year_str else ""
             
             # --- If Item is String (Fallback) ---
             elif isinstance(item, str):
-                if " - " in item:
-                    parts = item.split(" - ", 1)
-                    left_text = parts[0]
-                    right_text = parts[1]
-                else:
-                    left_text = item
-                    right_text = "" if is_movie_library else "Media"
+                key_text = item
+                value_text = ""
 
             # --- Deduplicate Keys ---
-            key = left_text
+            # Now deduplication happens on the EPISODE string (S04E05...), 
+            # which is much rarer to have collisions on.
+            key = key_text
             count = 2
             while key in attrs:
-                key = f"{left_text} ({count})"
+                key = f"{key_text} ({count})"
                 count += 1
             
-            attrs[key] = right_text
+            attrs[key] = value_text
             
         return attrs
-        
