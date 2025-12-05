@@ -3,18 +3,22 @@
     "step": {
       "user": {
         "title": "Connect to Emby",
-        "description": "Please enter your Emby Server connection details.",
+        "description": "Enter your Emby Server connection details.\n\nYou can find your **API Key** in your Emby Server Dashboard under **Advanced > API Keys**.",
         "data": {
-          "host": "Host / IP Address",
+          "host": "Server IP or Hostname",
           "port": "Port",
           "api_key": "API Key",
-          "ssl": "Use SSL (HTTPS)"
+          "ssl": "Use Secure Connection (HTTPS)"
+        },
+        "data_description": {
+          "host": "The IP address (e.g., 192.168.1.5) or hostname of your server.",
+          "api_key": "A dedicated API key created in your Emby Dashboard."
         }
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to Emby Server.",
-      "invalid_auth": "Invalid API Key.",
+      "cannot_connect": "Failed to connect to Emby Server. Check your IP and Port.",
+      "invalid_auth": "Invalid API Key. Please verify the key in your Emby Dashboard.",
       "unknown": "Unexpected error."
     },
     "abort": {
