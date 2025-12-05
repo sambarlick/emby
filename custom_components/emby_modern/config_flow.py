@@ -52,7 +52,6 @@ class EmbyConfigFlow(ConfigFlow, domain=DOMAIN):
                 await client.validate_connection()
 
                 # 2. Fetch System Info to get the Unique Server ID
-                # NOTE: This requires 'get_system_info' to exist in emby_client.py
                 system_info = await client.get_system_info()
                 server_id = system_info.get("Id")
                 server_name = system_info.get("ServerName", "Emby Server")
@@ -61,6 +60,7 @@ class EmbyConfigFlow(ConfigFlow, domain=DOMAIN):
                     raise CannotConnect("No Server ID found")
 
                 # 3. Set Unique ID to prevent duplicates
+                # This ensures if you add it manually, SSDP won't discover it again
                 await self.async_set_unique_id(server_id)
                 self._abort_if_unique_id_configured()
 
@@ -102,11 +102,17 @@ class EmbyConfigFlow(ConfigFlow, domain=DOMAIN):
         if udn.startswith("uuid:"):
             udn = udn[5:]
         
-        # 2. Set the unique ID immediately to prevent duplicate discovery
+        # FIX: Remove hyphens to match Emby's internal System ID format
+        # SSDP sends: 416809c9-1f52...
+        # Emby API sends: 416809c91f52...
+        # We must normalize to the API format to prevent duplicates.
+        udn = udn.replace("-", "")
+        
+        # 2. Set the unique ID immediately
         await self.async_set_unique_id(udn)
         self._abort_if_unique_id_configured()
 
-        # 3. Extract Host and Port from presentationURL (e.g., http://192.168.1.5:8096)
+        # 3. Extract Host and Port from presentationURL
         presentation_url = discovery_info.upnp.get("presentationURL")
         if presentation_url:
             parsed = urlparse(presentation_url)
@@ -114,9 +120,9 @@ class EmbyConfigFlow(ConfigFlow, domain=DOMAIN):
             if parsed.port:
                 self._discovered_port = parsed.port
 
-        # 4. Update the UI Title to show what we found
+        # 4. Update the UI Title
         friendly_name = discovery_info.upnp.get("friendlyName", "Emby Server")
         self.context["title_placeholders"] = {"name": friendly_name}
 
-        # 5. Redirect to the User Form (now pre-filled)
+        # 5. Redirect to the User Form
         return await self.async_step_user()
