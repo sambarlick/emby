@@ -1,26 +1,35 @@
-"""Base Entity for Emby."""
-from homeassistant.helpers.device_registry import DeviceInfo
+"""Base entity for Emby Modern."""
+from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
 from .const import DOMAIN
 
-class EmbyEntity(CoordinatorEntity):
-    """Defines a base Emby entity."""
-    _attr_has_entity_name = True
+class EmbyEntity(CoordinatorEntity, Entity):
+    """Base class for Emby entities."""
 
-    def __init__(self, coordinator, device_id, device_name, client_name=None, version=None):
+    def __init__(self, coordinator):
+        """Initialize the entity."""
         super().__init__(coordinator)
-        self._device_id = device_id
-        self._attr_unique_id = device_id
+        self.coordinator = coordinator
+        self.client = coordinator.client
         
-        # Use the real client name (e.g. "Emby for Android") if available
-        model_name = client_name or "Emby Client"
+        # --- THE FIX IS HERE ---
+        # We must grab the SAME ID that we used in __init__.py
+        # If the config entry has a unique_id (the Server UUID), use it.
+        # Otherwise, fall back to the entry_id.
+        self._device_id = coordinator.config_entry.unique_id or coordinator.config_entry.entry_id
+
+    @property
+    def device_info(self):
+        """Return device info for the Emby Server."""
+        system_info = self.coordinator.data.get("system_info", {})
         
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device_id)},
-            manufacturer="Emby",
-            model=model_name,
-            name=device_name,
-            sw_version=version,
-            via_device=(DOMAIN, coordinator.entry.entry_id),
-        )
-        
+        return {
+            # This identifier MUST match what is in __init__.py exactly
+            "identifiers": {(DOMAIN, self._device_id)},
+            "name": system_info.get("ServerName", "Emby Server"),
+            "manufacturer": "Emby",
+            "model": "Emby Server",
+            "sw_version": system_info.get("Version", "Unknown"),
+            "configuration_url": self.client.get_server_url(),
+     }
