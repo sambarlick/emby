@@ -22,14 +22,13 @@ class EmbyServerUpdate(EmbyEntity, UpdateEntity):
     _attr_icon = "mdi:update"
 
     def __init__(self, coordinator):
+        # FIX: device_id=None allows the base class to use the Server UUID
         super().__init__(
             coordinator, 
-            coordinator.entry.entry_id, 
-            coordinator.client.get_server_name(),
+            device_id=None, 
             client_name="Emby Server"
         )
         self._attr_name = "Emby Server Update"
-        # FIX: Use the stable System GUID
         self._attr_unique_id = f"{coordinator.entry.unique_id}-update"
         self._attr_title = "Emby Server"
 
@@ -47,11 +46,6 @@ class EmbyServerUpdate(EmbyEntity, UpdateEntity):
     def latest_version(self) -> str | None:
         """Latest version available for install."""
         info = self.coordinator.data.get("system_info", {})
-        # If Emby says update available, but doesn't give a version, 
-        # we can't display 'Update Available' as a version string.
-        # Ideally, we query the Github API or Emby releases here, 
-        # but for now, we just reflect the current version if we can't find the new one.
-        # (This prevents the entity from looking 'broken' with a text string as a version)
         return info.get("Version") 
 
     @property
