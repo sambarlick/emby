@@ -1,7 +1,7 @@
 {
   "domain": "emby_modern",
   "name": "Emby (Modern)",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "config_flow": true,
   "documentation": "https://github.com/sambarlick/emby",
   "issue_tracker": "https://github.com/sambarlick/emby/issues",
