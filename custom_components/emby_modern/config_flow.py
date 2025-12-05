@@ -36,6 +36,26 @@ class EmbyConfigFlow(ConfigFlow, domain=DOMAIN):
 
         # If the user has submitted the form
         if user_input is not None:
+            # --- INPUT CLEANING LOGIC ---
+            # 1. Strip whitespace
+            host = user_input[CONF_HOST].strip()
+            
+            # 2. Strip protocol (http:// or https://) to prevent connection errors
+            if host.startswith("http://"):
+                host = host[7:]
+            elif host.startswith("https://"):
+                host = host[8:]
+                # Be smart: if they typed https, check the SSL box for them!
+                user_input[CONF_SSL] = True
+            
+            # 3. Strip trailing slashes
+            if host.endswith("/"):
+                host = host[:-1]
+                
+            # Write cleaned host back to input
+            user_input[CONF_HOST] = host
+            # -----------------------------
+
             session = async_get_clientsession(self.hass)
             
             client = EmbyClient(
