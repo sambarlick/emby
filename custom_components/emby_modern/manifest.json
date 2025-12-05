@@ -1,6 +1,6 @@
 {
   "domain": "emby_modern",
-  "name": "Emby Modern",
+  "name": "Emby (Modern)",
   "version": "1.0.0",
   "config_flow": true,
   "documentation": "https://github.com/sambarlick/emby",
