@@ -32,36 +32,39 @@ class EmbyClient:
 
         try:
             # 1. Get System Info
-            info = await self.api_request("GET", "System/Info")
+            info = await self.get_system_info()
             self._server_name = info.get("ServerName", "Emby Server")
-            # CAPTURE THE ID HERE
-            self._system_id = info.get("Id") 
+            server_id = info.get("Id") 
 
-            # 2. Find User ID
-            sessions = await self.api_request("GET", "Sessions")
-            if sessions:
-                for sess in sessions:
-                    if "UserId" in sess:
-                        self._user_id = sess["UserId"]
-                        break
-            
-            if not self._user_id:
-                users = await self.api_request("GET", "Users", params={"IsHidden": "true"})
-                if users and "Items" in users and len(users["Items"]) > 0:
-                    self._user_id = users["Items"][0]["Id"]
+            # 2. Find User ID (Required for libraries/media)
+            await self._find_user_id()
 
-            # Return a dict with both the name (for display) and ID (for config)
             return {
                 "title": self._server_name,
-                "unique_id": self._system_id
+                "unique_id": server_id
             }
 
         except InvalidAuth:
             raise
         except Exception as err:
             raise CannotConnect(f"Connection check failed: {err}")
-            
-   
+
+    async def _find_user_id(self):
+        """Find a valid Admin/User ID to use for queries."""
+        # Try to find a user via Sessions first
+        sessions = await self.api_request("GET", "Sessions")
+        if sessions:
+            for sess in sessions:
+                if "UserId" in sess:
+                    self._user_id = sess["UserId"]
+                    return
+
+        # Fallback to Users list
+        if not self._user_id:
+            users = await self.api_request("GET", "Users", params={"IsHidden": "true"})
+            if users and "Items" in users and len(users["Items"]) > 0:
+                self._user_id = users["Items"][0]["Id"]
+
     async def api_request(self, method: str, endpoint: str, params: dict = None) -> Any:
         headers = {"X-Emby-Token": self.api_key, "Accept": "application/json"}
         url = f"{self._url}/{endpoint}"
@@ -70,19 +73,16 @@ class EmbyClient:
                 method, url, headers=headers, params=params, timeout=ClientTimeout(total=10)
             ) as resp:
                 if resp.status == 401: raise InvalidAuth("Invalid API Key")
-                
-                # FIX: Handle 204 No Content as success
-                if resp.status == 204:
-                    return None
+                if resp.status == 204: return None
                 
                 if resp.status >= 400:
                     try:
                         error_text = await resp.text()
                     except:
                         error_text = ""
-                    raise CannotConnect(f"Error {resp.status}: {error_text}")
+                    _LOGGER.error(f"Emby API Error {resp.status} on {endpoint}: {error_text}")
+                    return None # Return None instead of crashing for non-critical errors
                 
-                # Only try to parse JSON if we have content
                 try:
                     return await resp.json()
                 except Exception:
@@ -91,28 +91,43 @@ class EmbyClient:
         except ClientError as err:
             raise CannotConnect(f"Connection error: {err}")
 
-    # --- API Methods ---
+    # --- API Methods Used by Config Flow & Entities ---
 
-    # This is the method that was missing and causing the crash
     async def get_system_info(self) -> dict:
         """Get the full system info response."""
-        return await self.api_request("GET", "System/Info")
+        return await self.api_request("GET", "System/Info") or {}
 
-    async def get_media_folders(self) -> dict:
-        if not self._user_id: return {}
-        return await self.api_request("GET", f"Users/{self._user_id}/Views")
+    async def get_sessions(self) -> list:
+        """Get current active sessions (for Media Players)."""
+        return await self.api_request("GET", "Sessions") or []
 
-    async def get_item(self, item_id: str) -> dict:
-        if not self._user_id: return {}
-        return await self.api_request("GET", f"Users/{self._user_id}/Items/{item_id}")
+    async def get_libraries(self) -> list:
+        """Get libraries (Views) for Sensors."""
+        if not self._user_id: await self._find_user_id()
+        if not self._user_id: return []
+        
+        data = await self.api_request("GET", f"Users/{self._user_id}/Views")
+        return data.get("Items", []) if data else []
 
-    async def get_items(self, params: dict) -> dict:
-        if not self._user_id: return {}
-        return await self.api_request("GET", f"Users/{self._user_id}/Items", params=params)
+    async def get_latest_items(self, library_id, limit=5) -> list:
+        """Get latest items for a specific library."""
+        if not self._user_id: return []
+        
+        params = {
+            "Limit": limit,
+            "ParentId": library_id,
+            "Recursive": "true",
+            "SortBy": "DateCreated",
+            "SortOrder": "Descending",
+            "IsPlayed": "false" # Optional: Only show unplayed?
+        }
+        data = await self.api_request("GET", f"Users/{self._user_id}/Items", params=params)
+        return data.get("Items", []) if data else []
 
-    def get_artwork_url(self, item_id: str, type: str = "Primary", max_width: int = 600) -> str:
+    # Used by MediaPlayer entity
+    def get_artwork_url(self, item_id: str, type: str = "Primary", max_width: int = 400) -> str:
         return f"{self._url}/Items/{item_id}/Images/{type}?maxHeight={max_width}&Quality=90"
 
-    def get_server_name(self): return self._server_name or "Emby Server"
-    def get_server_url(self):
-        return self._url
+    # Used by Sensor entity
+    def get_server_name(self): 
+        return self._server_name or "Emby Server"
