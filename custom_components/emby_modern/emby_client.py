@@ -119,3 +119,7 @@ class EmbyClient:
     # Used by sensor.py
     def get_server_name(self): 
         return self._server_name or "Emby Server"
+
+    # RESTORED: Used by __init__.py (this was the missing piece)
+    def get_server_url(self):
+        return self._url
