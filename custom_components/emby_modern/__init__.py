@@ -65,10 +65,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     server_version = coordinator.data.get("system_info", {}).get("Version", "Unknown")
     server_name = client.get_server_name() or "Emby Server"
 
+    # FIX: Use the Unique ID (Server UUID) to match what entities use.
+    # If for some reason it's missing, fall back to entry_id.
+    device_identifier = entry.unique_id or entry.entry_id
+
     device_registry = dr.async_get(hass)
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, entry.entry_id)},
+        identifiers={(DOMAIN, device_identifier)}, # Changed from entry.entry_id
         manufacturer="Emby",
         name=server_name,
         model="Emby Server",
@@ -90,10 +94,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             
     return unload_ok
 
-# --- NEW HOOK FOR DELETION ---
 async def async_remove_config_entry_device(
     hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
 ) -> bool:
     """Remove a config entry from a device."""
-    # Return True to allow the device to be removed from the registry
     return True
