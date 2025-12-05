@@ -23,8 +23,7 @@ This integration focuses on stability, connection resilience, and using modern H
 
 ## 📥 Installation
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=sambarlicksambarlick&repository=emby_modern&category=integration)
-
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=sambarlick&repository=emby&category=integration)
 
 ### Option 1: HACS (Recommended)
 1.  Open HACS in Home Assistant.
