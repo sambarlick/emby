@@ -60,5 +60,4 @@ class EmbyServerUpdate(EmbyEntity, UpdateEntity):
 
     async def async_install(self, version: str | None, backup: bool, **kwargs: Any) -> None:
         """Install an update (Restart Server to trigger)."""
-        await self.coordinator.client.api_request("POST", "System
-/Restart")
+        await self.coordinator.client.api_request("POST", "System/Restart")
