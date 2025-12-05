@@ -5,6 +5,7 @@ from datetime import timedelta
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from .emby_client import EmbyClient
+from homeassistant.core import callback # ADDED: Required for event handlers
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -103,9 +104,18 @@ class EmbyDataUpdateCoordinator(DataUpdateCoordinator):
             }
             
         except Exception as err:
+            # IMPORTANT: Re-raising the error here allows the sensor/switch to mark the server as UNAVAILABLE
             raise UpdateFailed(f"Error communicating with API: {err}")
 
     async def async_connect(self) -> None:
         await self.client.validate_connection()
         await self.async_config_entry_first_refresh()
         
+    @callback
+    def setup_global_listeners(self, courtesy_callback):
+        """Register WebSocket listeners directly on the client for global events."""
+        
+        # This fixes the AttributeError from __init__.py by correctly calling the listener method
+        # on the client object, which the coordinator manages.
+        self.client.add_message_listener("ServerShuttingDown", courtesy_callback)
+        self.client.add_message_listener("ServerRestarting", courtesy_callback)
