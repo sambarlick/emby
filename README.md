@@ -10,16 +10,16 @@ This integration focuses on stability, connection resilience, and using modern H
 * **🚀 Data Update Coordinator:** Uses efficient polling to keep server availability and library status in sync without overloading Home Assistant.
 * **🔒 Authentication:** Proper handling of Emby API Keys and User Sessions.
 * **🎥 Media Players:** Controls for all your Emby sessions.
+* **📊 Library Statistics:** Real-time sensors for Movie, Series, and Episode counts.  <-- MOVED HERE
+* **🎮 Remote Control:** Control your Emby clients directly.
+* **🔘 Buttons:** Trigger server tasks instantly.
 * **🛠️ Robustness:** Handles server restarts and connection drops gracefully.
 
 ## ⚠️ Known Limitations & Roadmap
 
-* **Browse Media:** The "Media Browser" sidebar feature is currently disabled in `v1.0.0` to ensure stability. This functionality is being rewritten for a future `v2.0` release.
-* **Entities:** Currently supports Media Players and Server Sensors.
+* **Active Platforms:** Media Player, Sensor, Button, Remote.
 * **Future Plans:**
     * Re-introduce Browse Media (v2.0).
-    * Detailed library statistics sensors.
-    * Remote control entities.
 
 ## 📥 Installation
 
