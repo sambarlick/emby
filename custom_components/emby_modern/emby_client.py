@@ -92,6 +92,12 @@ class EmbyClient:
             raise CannotConnect(f"Connection error: {err}")
 
     # --- API Methods ---
+
+    # This is the method that was missing and causing the crash
+    async def get_system_info(self) -> dict:
+        """Get the full system info response."""
+        return await self.api_request("GET", "System/Info")
+
     async def get_media_folders(self) -> dict:
         if not self._user_id: return {}
         return await self.api_request("GET", f"Users/{self._user_id}/Views")
@@ -108,5 +114,5 @@ class EmbyClient:
         return f"{self._url}/Items/{item_id}/Images/{type}?maxHeight={max_width}&Quality=90"
 
     def get_server_name(self): return self._server_name or "Emby Server"
-    def get_server_url(self): return self._url
-    
+    def get_server_url(self):
+        return self._url
