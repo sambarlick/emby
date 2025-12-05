@@ -4,26 +4,29 @@ A robust, modern integration for Emby Media Server, designed to replace the lega
 
 This integration focuses on stability, connection resilience, and using modern Home Assistant architecture (DataUpdateCoordinators) to ensure your entities state stays in sync with your server.
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=sambarlick&repository=emby&category=integration)
+
 ## ✨ Features
 
 * **⚡ ZeroConf Discovery:** Automatically finds your Emby server on the network—no manual IP entry required.
 * **🚀 Data Update Coordinator:** Uses efficient polling to keep server availability and library status in sync without overloading Home Assistant.
 * **🔒 Authentication:** Proper handling of Emby API Keys and User Sessions.
-* **🎥 Media Players:** Controls for all your Emby sessions.
-* **📊 Library Statistics:** Real-time sensors for Movie, Series, and Episode counts.  <-- MOVED HERE
+* **🎥 Media Players:** Controls for all your Emby sessions with artwork support.
+* **📊 Library Statistics:** Real-time sensors for Movie, Series, and Episode counts.
+* **🔘 Server Controls:** Dedicated buttons to **Restart Server** and **Scan Library** directly from Home Assistant.
 * **🎮 Remote Control:** Control your Emby clients directly.
 * **🔘 Buttons:** Trigger server tasks instantly.
 * **🛠️ Robustness:** Handles server restarts and connection drops gracefully.
 
 ## ⚠️ Known Limitations & Roadmap
 
+* **Latency:** This integration uses local polling. State updates (Play/Pause) may take a few seconds to reflect in Home Assistant.
 * **Active Platforms:** Media Player, Sensor, Button, Remote.
 * **Future Plans:**
     * Re-introduce Browse Media (v2.0).
+    * WebSocket implementation for instant updates (v2.0).
 
 ## 📥 Installation
-
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=sambarlick&repository=emby&category=integration)
 
 ### Option 1: HACS (Recommended)
 1.  Open HACS in Home Assistant.
@@ -48,4 +51,5 @@ This integration focuses on stability, connection resilience, and using modern H
 
 ## Credits
 Built by **@sambarlick**.
-Inspired by the Jellyfin core integration architecture.
+Inspired by the Jellyfin core integration 
+architecture.
