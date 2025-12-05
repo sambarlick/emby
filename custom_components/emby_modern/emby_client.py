@@ -81,7 +81,7 @@ class EmbyClient:
                     except:
                         error_text = ""
                     _LOGGER.error(f"Emby API Error {resp.status} on {endpoint}: {error_text}")
-                    return None # Return None instead of crashing for non-critical errors
+                    return None
                 
                 try:
                     return await resp.json()
@@ -91,43 +91,31 @@ class EmbyClient:
         except ClientError as err:
             raise CannotConnect(f"Connection error: {err}")
 
-    # --- API Methods Used by Config Flow & Entities ---
+    # --- API Methods ---
 
     async def get_system_info(self) -> dict:
         """Get the full system info response."""
         return await self.api_request("GET", "System/Info") or {}
 
-    async def get_sessions(self) -> list:
-        """Get current active sessions (for Media Players)."""
-        return await self.api_request("GET", "Sessions") or []
-
-    async def get_libraries(self) -> list:
-        """Get libraries (Views) for Sensors."""
+    # Restored: Used by your Coordinator
+    async def get_media_folders(self) -> dict:
+        """Get the top-level views (libraries)."""
         if not self._user_id: await self._find_user_id()
-        if not self._user_id: return []
-        
-        data = await self.api_request("GET", f"Users/{self._user_id}/Views")
-        return data.get("Items", []) if data else []
+        if not self._user_id: return {}
+        # Returns the full dict so your coordinator's 'if "Items" in folders' check works
+        return await self.api_request("GET", f"Users/{self._user_id}/Views")
 
-    async def get_latest_items(self, library_id, limit=5) -> list:
-        """Get latest items for a specific library."""
-        if not self._user_id: return []
-        
-        params = {
-            "Limit": limit,
-            "ParentId": library_id,
-            "Recursive": "true",
-            "SortBy": "DateCreated",
-            "SortOrder": "Descending",
-            "IsPlayed": "false" # Optional: Only show unplayed?
-        }
-        data = await self.api_request("GET", f"Users/{self._user_id}/Items", params=params)
-        return data.get("Items", []) if data else []
+    # Restored: Used by your Coordinator
+    async def get_items(self, params: dict) -> dict:
+        """Generic item fetcher."""
+        if not self._user_id: await self._find_user_id()
+        if not self._user_id: return {}
+        return await self.api_request("GET", f"Users/{self._user_id}/Items", params=params)
 
-    # Used by MediaPlayer entity
+    # Used by media_player.py
     def get_artwork_url(self, item_id: str, type: str = "Primary", max_width: int = 400) -> str:
         return f"{self._url}/Items/{item_id}/Images/{type}?maxHeight={max_width}&Quality=90"
 
-    # Used by Sensor entity
+    # Used by sensor.py
     def get_server_name(self): 
         return self._server_name or "Emby Server"
