@@ -8,22 +8,20 @@ from .const import DOMAIN
 class EmbyEntity(CoordinatorEntity, Entity):
     """Base class for Emby entities."""
 
-    # FIX: Added arguments to match what media_player/sensor are sending
     def __init__(self, coordinator, device_id=None, device_name=None, client_name=None, version=None):
         """Initialize the entity."""
         super().__init__(coordinator)
         self.coordinator = coordinator
         self.client = coordinator.client
         
-        # If a specific device_id was passed (e.g. from a Media Player), use it.
-        # Otherwise, default to the Server ID (for sensors/buttons).
+        # 1. Determine Device Identity
         if device_id:
             self._device_id = device_id
             self._device_name = device_name
             self._model = client_name
             self._version = version
         else:
-            # Fallback logic for Server entities
+            # Fallback for Server Entities (like the Restart Button)
             self._device_id = coordinator.config_entry.unique_id or coordinator.config_entry.entry_id
             self._device_name = self.coordinator.data.get("system_info", {}).get("ServerName", "Emby Server")
             self._model = "Emby Server"
@@ -44,5 +42,9 @@ class EmbyEntity(CoordinatorEntity, Entity):
     @property
     def unique_id(self):
         """Return a unique ID for this entity."""
-        # This ensures the entity has a stable ID in the HA Registry
+        # CRITICAL FIX: If the child class (e.g. Button) set a specific ID, use it!
+        if self._attr_unique_id:
+            return self._attr_unique_id
+            
+        # Otherwise, calculate one based on the device
         return f"{self.coordinator.entry.unique_id}-{self._device_id}"
