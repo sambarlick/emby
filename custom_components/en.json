@@ -1,0 +1,25 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Emby",
+        "description": "Please enter your Emby Server connection details.",
+        "data": {
+          "host": "Host / IP Address",
+          "port": "Port",
+          "api_key": "API Key",
+          "ssl": "Use SSL (HTTPS)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Emby Server.",
+      "invalid_auth": "Invalid API Key.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This Emby server is already configured.",
+      "no_url": "Could not discover Emby URL."
+    }
+  }
+}
