@@ -35,8 +35,9 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddC
             if session_id and session_id not in added_sessions:
                 device_id = session.get("DeviceId") or session_id
                 device_name = session.get("DeviceName") or "Unknown Device"
-                client_name = session.get("Client") # Get the client name
+                client_name = session.get("Client")
                 
+                # Session buttons still need specific IDs, this is fine
                 new_buttons.append(EmbyKillButton(coordinator, session_id, device_id, device_name, client_name))
                 added_sessions.add(session_id)
         
@@ -49,14 +50,14 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddC
 
 class EmbyServerButton(EmbyEntity, ButtonEntity):
     def __init__(self, coordinator, description):
+        # FIX: device_id=None allows the base class to use the Server UUID
         super().__init__(
             coordinator, 
-            coordinator.entry.entry_id, 
-            coordinator.client.get_server_name(),
+            device_id=None,
             client_name="Emby Server"
         )
         self.entity_description = description
-        # FIX: Use unique_id (GUID) instead of server name
+        # Unique ID for the entity itself (must include key to differentiate restart vs scan)
         self._attr_unique_id = f"{coordinator.entry.unique_id}-{description.key}"
 
     async def async_press(self) -> None:
@@ -70,7 +71,6 @@ class EmbyKillButton(EmbyEntity, ButtonEntity):
     _attr_icon = "mdi:stop-circle-outline"
 
     def __init__(self, coordinator, session_id, device_id, device_name, client_name):
-        # Pass client_name so the button belongs to the correct device type
         super().__init__(coordinator, device_id, device_name, client_name)
         self.session_id = session_id
         self._attr_unique_id = f"kill-{session_id}"
@@ -87,4 +87,3 @@ class EmbyKillButton(EmbyEntity, ButtonEntity):
         except CannotConnect:
             pass
         await self.coordinator.async_request_refresh()
-        
