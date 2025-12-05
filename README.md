@@ -45,5 +45,5 @@ This integration focuses on stability, connection resilience, and using modern H
 4.  Enter your Host (IP) and API Key.
 
 ## Credits
-Built by **@sambarlicksambarlick**.
+Built by **@sambarlick**.
 Inspired by the Jellyfin core integration architecture.
