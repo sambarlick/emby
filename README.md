@@ -1,5 +1,8 @@
 # Emby (Modern) for Home Assistant
 
+![Built with Gemini](https://img.shields.io/badge/Built%20with-Gemini-8E75B2?style=for-the-badge&logo=google-gemini&logoColor=white)
+
+
 A robust, modern integration for Emby Media Server, designed to replace the legacy built-in integration.
 
 This integration focuses on stability, connection resilience, and using modern Home Assistant architecture (DataUpdateCoordinators) to ensure your entities state stays in sync with your server.
@@ -50,6 +53,6 @@ This integration focuses on stability, connection resilience, and using modern H
 4.  Enter your Host (IP) and API Key.
 
 ## Credits
-Built by **@sambarlick**.
-Inspired by the Jellyfin core integration 
-architecture.
+* **Architect & Maintainer:** @sambarlick
+* **Code Generation:** Google Gemini (AI)
+* **Inspiration:** The official Jellyfin Home Assistant integration architecture.
