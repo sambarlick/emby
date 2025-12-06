@@ -1,16 +1,24 @@
 """Support for Emby media players."""
-from .entity import EmbyEntity
-from __future__ import annotations
+from __future__ import annotations # FIX: Moved to top
 import logging
 from typing import Any
 
 from homeassistant.components.media_player import (
     BrowseMedia, MediaPlayerEntity, MediaPlayerEntityFeature, MediaPlayerState, MediaType
 )
-# ... other imports remain unchanged ...
+from homeassistant.const import DEVICE_DEFAULT_NAME
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from .browse_media import async_browse_media
+from .const import IGNORED_CLIENTS
+from .entity import EmbyEntity 
+
+_LOGGER = logging.getLogger(__name__)
+
+# NOTE: async_setup_entry function remains unchanged in this file.
 
 class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
-# ... __init__ and properties remain unchanged ...
+# ... __init__ and existing properties remain unchanged ...
 
     @property
     def supported_features(self) -> MediaPlayerEntityFeature:
@@ -74,5 +82,5 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
             await self.coordinator.client.api_request("POST", f"Sessions/{self.session_id}/Command/{cmd}")
         await self.coordinator.async_request_refresh()
 
-    # NOTE: async_media_play, async_media_pause, async_media_stop, async_media_next_track, 
-    # async_media_previous_track, async_play_media, async_browse_media remain unchanged.
+# NOTE: async_media_play, async_media_pause, async_media_stop, async_media_next_track, 
+# async_media_previous_track, async_play_media, async_browse_media remain unchanged.
