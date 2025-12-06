@@ -1,0 +1,24 @@
+send_message:
+  name: Send Message
+  description: Sends a pop-up message to active Emby clients.
+  fields:
+    message:
+      description: The text message to display.
+      required: true
+      selector:
+        text:
+    header:
+      description: The header title of the message.
+      required: false
+      default: "Home Assistant Alert"
+      selector:
+        text:
+    timeout_ms:
+      description: How long the message stays on screen (in milliseconds).
+      required: false
+      default: 5000
+      selector:
+        number:
+          min: 1000
+          max: 60000
+          unit_of_measurement: ms
