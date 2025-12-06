@@ -96,4 +96,3 @@ class EmbyRemote(EmbyEntity, RemoteEntity):
 
                 if delay > 0:
                     await asyncio.sleep(delay)
-                    
