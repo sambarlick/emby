@@ -9,7 +9,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import config_validation as cv
-import voluptuous as vol # ADDED: Required for service schema
+import voluptuous as vol
 
 from .const import DOMAIN
 from .coordinator import EmbyDataUpdateCoordinator
