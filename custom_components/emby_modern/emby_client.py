@@ -1,6 +1,9 @@
 import logging
-from typing import Any
-from aiohttp import ClientSession, ClientError, ClientTimeout
+import asyncio
+import json
+import aiohttp
+from typing import Any, Callable
+from aiohttp import ClientSession, ClientError, ClientTimeout, WSMsgType
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,6 +27,13 @@ class EmbyClient:
         
         protocol = "https" if ssl else "http"
         self._url = f"{protocol}://{host}:{port}"
+        
+        # WebSocket Variables
+        self._ws_url = f"{'wss' if ssl else 'ws'}://{host}:{port}/embywebsocket?api_key={api_key}&deviceId=homeassistant"
+        self._ws = None
+        self._listeners = {} # { "EventName": [callback_function] }
+        self._loop = loop or asyncio.get_event_loop()
+        self._ws_task = None
 
     async def validate_connection(self) -> dict:
         """Validate connection and get System Info."""
@@ -35,6 +45,10 @@ class EmbyClient:
             self._server_name = info.get("ServerName", "Emby Server")
             server_id = info.get("Id") 
             await self._find_user_id()
+            
+            # Start WebSocket connection in background if validated
+            if not self._ws_task:
+                self._ws_task = self._loop.create_task(self._websocket_loop())
 
             return {
                 "title": self._server_name,
@@ -47,19 +61,21 @@ class EmbyClient:
 
     async def _find_user_id(self):
         """Find a valid Admin/User ID to use for queries."""
-        sessions = await self.api_request("GET", "Sessions")
-        if sessions:
-            for sess in sessions:
-                if "UserId" in sess:
-                    self._user_id = sess["UserId"]
-                    return
+        try:
+            sessions = await self.api_request("GET", "Sessions")
+            if sessions:
+                for sess in sessions:
+                    if "UserId" in sess:
+                        self._user_id = sess["UserId"]
+                        return
 
-        if not self._user_id:
-            users = await self.api_request("GET", "Users", params={"IsHidden": "true"})
-            if users and "Items" in users and len(users["Items"]) > 0:
-                self._user_id = users["Items"][0]["Id"]
+            if not self._user_id:
+                users = await self.api_request("GET", "Users", params={"IsHidden": "true"})
+                if users and "Items" in users and len(users["Items"]) > 0:
+                    self._user_id = users["Items"][0]["Id"]
+        except Exception:
+            pass # Non-critical if user ID finding fails initially
 
-    # FIX: Added 'json' parameter here so Remote Control can send payloads
     async def api_request(self, method: str, endpoint: str, params: dict = None, json_data: dict = None) -> Any:
         headers = {"X-Emby-Token": self.api_key, "Accept": "application/json"}
         url = f"{self._url}/{endpoint}"
@@ -109,3 +125,50 @@ class EmbyClient:
 
     def get_server_url(self):
         return self._url
+
+    # --- WebSocket Handling (ADDED) ---
+
+    def add_message_listener(self, event_name: str, callback: Callable):
+        """Register a callback for a specific WebSocket event."""
+        if event_name not in self._listeners:
+            self._listeners[event_name] = []
+        self._listeners[event_name].append(callback)
+
+    async def _websocket_loop(self):
+        """Maintain WebSocket connection."""
+        while True:
+            try:
+                async with self._session.ws_connect(self._ws_url, heartbeat=30) as ws:
+                    self._ws = ws
+                    _LOGGER.debug("Connected to Emby WebSocket")
+                    
+                    # Send identification
+                    await ws.send_json({"MessageType": "SessionsStart", "Data": "1000,1000"})
+                    
+                    async for msg in ws:
+                        if msg.type == WSMsgType.TEXT:
+                            try:
+                                data = msg.json()
+                                msg_type = data.get("MessageType")
+                                
+                                # 1. Notify listeners for specific events
+                                if msg_type in self._listeners:
+                                    for listener in self._listeners[msg_type]:
+                                        try:
+                                            listener(data)
+                                        except Exception as e:
+                                            _LOGGER.error(f"Error in listener for {msg_type}: {e}")
+                                            
+                                # 2. Map generic 'Event' type messages (common in Emby)
+                                if msg_type == "Package" or msg_type == "ScheduledTasksInfo":
+                                    pass # Placeholder for future event handling
+                                    
+                            except ValueError:
+                                pass
+                        elif msg.type == WSMsgType.ERROR:
+                            break
+            except Exception as e:
+                _LOGGER.debug(f"WebSocket connection lost: {e}")
+                
+            # Reconnect delay
+            await asyncio.sleep(10)
