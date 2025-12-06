@@ -8,8 +8,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers import config_validation as cv # FIX: Added for service schema
-import voluptuous as vol # FIX: Added for service schema
+from homeassistant.helpers import config_validation as cv
+import voluptuous as vol
 
 from .const import DOMAIN
 from .coordinator import EmbyDataUpdateCoordinator
@@ -23,10 +23,10 @@ PLATFORMS = [
     Platform.BUTTON,
     Platform.REMOTE,
     Platform.UPDATE,
-    Platform.SWITCH,
+    Platform.SWITCH, # Included SWITCH to allow loading
 ]
 
-# Service schema definition (moved outside async_setup_entry)
+# Service schema definition
 EMBY_SEND_MESSAGE_SCHEMA = vol.Schema({
     vol.Required("message"): cv.string,
     vol.Optional("header", default="Home Assistant Alert"): cv.string,
@@ -37,13 +37,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Emby Modern component and register global services."""
     hass.data.setdefault(DOMAIN, {})
 
-    # SERVICE: Send Message
+    # Service Function Definition (Needs to be defined here)
     async def send_message_service(call):
         message = call.data.get("message")
         header = call.data.get("header", "Home Assistant Alert")
         timeout = call.data.get("timeout_ms", 5000)
         
-        # We need the coordinator instance. We'll use the first one we find.
+        # Use the first registered coordinator instance for the client access
         coordinator = next(iter(hass.data[DOMAIN].values()), None)
         if not coordinator:
             _LOGGER.error("Cannot send message: No Emby coordinator instance found.")
@@ -52,11 +52,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         client = coordinator.client
         sessions = coordinator.data.get("sessions", [])
         
-        params = {
-            "Header": header,
-            "Text": message,
-            "TimeoutMs": timeout
-        }
+        params = {"Header": header, "Text": message, "TimeoutMs": timeout}
 
         for session in sessions:
             try:
@@ -65,12 +61,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 _LOGGER.warning(f"Failed to send message to session {session.get('UserName')}: {e}")
 
     # Register the service with the defined schema
-    hass.services.async_register(
-        DOMAIN, 
-        "send_message", 
-        send_message_service, 
-        schema=EMBY_SEND_MESSAGE_SCHEMA
-    )
+    hass.services.async_register(DOMAIN, "send_message", send_message_service, schema=EMBY_SEND_MESSAGE_SCHEMA)
 
     return True
 
@@ -78,7 +69,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Emby Modern from a config entry."""
     session = async_get_clientsession(hass)
 
-    # ... (Client setup and validation remains unchanged) ...
+    # 1. Initialize Client 
+    client = EmbyClient(
+        entry.data[CONF_HOST],
+        entry.data[CONF_PORT],
+        entry.data[CONF_API_KEY],
+        entry.data[CONF_SSL],
+        hass.loop,
+        session
+    )
+
+    # 2. Validate Connection
+    try:
+        await client.validate_connection()
+    except (CannotConnect, TimeoutError) as err:
+        raise ConfigEntryNotReady(f"Emby not ready: {err}") from err
+    except InvalidAuth as err:
+        _LOGGER.error(f"Authentication failed: {err}")
+        return False
+    except Exception as err:
+        _LOGGER.error(f"Unexpected error connecting to Emby: {err}")
+        return False
 
     # 3. Setup Coordinator
     coordinator = EmbyDataUpdateCoordinator(hass, client, entry)
@@ -89,7 +100,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     # 5. Register the Main Device (The Server itself)
-    # ... (Device registration remains unchanged) ...
     server_version = coordinator.data.get("system_info", {}).get("Version", "Unknown")
     server_name = client.get_server_name() or "Emby Server"
 
@@ -106,22 +116,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         configuration_url=client.get_server_url(),
     )
 
-    # 6. Load Platforms (This is where the import error occurred)
+    # 6. Load Platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # 7. SETUP COURTESY MESSAGE LISTENER (FIXED BLOCK)
-    # The callback function needs to be defined here to access 'hass' and 'entry'
     @callback
     def _handle_courtesy_message(data):
-        """Called when ServerShuttingDown or ServerRestarting event is received."""
-        
         switch_entity_id = f"switch.emby_server_{entry.entry_id}_shutdown_courtesy_mode"
         switch_state = hass.states.get(switch_entity_id)
 
         if switch_state and switch_state.state == 'on':
             event_type = "Restarting" if data.get("EventName") == "ServerRestarting" else "Shutting Down"
             
-            # Send the broadcast message asynchronously by calling the service function directly
+            # Call the registered service asynchronously
             hass.async_create_task(
                 hass.services.async_call(
                     DOMAIN,
@@ -134,10 +141,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     blocking=False
                 )
             )
-
-    # FIX: Register the listener on the coordinator (which has the client)
+            
     coordinator.setup_global_listeners(_handle_courtesy_message)
-    
+
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
