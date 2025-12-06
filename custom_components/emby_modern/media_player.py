@@ -1,4 +1,5 @@
 """Support for Emby media players."""
+from .entity import EmbyEntity
 from __future__ import annotations
 import logging
 from typing import Any
