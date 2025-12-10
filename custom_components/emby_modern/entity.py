@@ -7,6 +7,9 @@ from .const import DOMAIN
 
 class EmbyEntity(CoordinatorEntity, Entity):
     """Base class for Emby entities."""
+    
+    _attr_has_entity_name = True # FIX: Tells HA to name entity relative to device
+    _attr_name = None            # FIX: Default to device name (e.g. "Living Room TV")
 
     def __init__(self, coordinator, device_id=None, device_name=None, client_name=None, version=None):
         """Initialize the entity."""
@@ -42,7 +45,7 @@ class EmbyEntity(CoordinatorEntity, Entity):
     @property
     def unique_id(self):
         """Return a unique ID for this entity."""
-        # CRITICAL FIX: If the child class (e.g. Button) set a specific ID, use it!
+        # Use child class ID if provided (e.g. for Button/Update entities)
         if self._attr_unique_id:
             return self._attr_unique_id
             
