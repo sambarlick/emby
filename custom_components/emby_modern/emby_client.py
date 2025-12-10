@@ -16,7 +16,7 @@ class InvalidAuth(Exception):
 class EmbyClient:
     """Wrapper for Emby API."""
 
-    def __init__(self, host, port, api_key, ssl, loop=None, session: ClientSession | None = None):
+    def __init__(self, host, port, api_key, ssl, session: ClientSession | None = None):
         self.host = host
         self.port = port
         self.api_key = api_key
@@ -32,8 +32,6 @@ class EmbyClient:
         self._ws_url = f"{'wss' if ssl else 'ws'}://{host}:{port}/embywebsocket?api_key={api_key}&deviceId=homeassistant"
         self._ws = None
         self._listeners = {} # { "EventName": [callback_function] }
-        # Store loop if provided, otherwise use running loop
-        self._loop = loop or asyncio.get_running_loop()
         self._ws_task = None
 
     async def validate_connection(self) -> dict:
@@ -49,7 +47,9 @@ class EmbyClient:
             
             # Start WebSocket connection in background if validated
             if not self._ws_task:
-                self._ws_task = self._loop.create_task(self._websocket_loop())
+                # We use the running loop automatically
+                loop = asyncio.get_running_loop()
+                self._ws_task = loop.create_task(self._websocket_loop())
 
             return {
                 "title": self._server_name,
@@ -75,7 +75,7 @@ class EmbyClient:
                 if users and "Items" in users and len(users["Items"]) > 0:
                     self._user_id = users["Items"][0]["Id"]
         except Exception:
-            pass # Non-critical if user ID finding fails initially
+            pass 
 
     async def api_request(self, method: str, endpoint: str, params: dict = None, json_data: dict = None) -> Any:
         headers = {"X-Emby-Token": self.api_key, "Accept": "application/json"}
@@ -87,6 +87,10 @@ class EmbyClient:
                 if resp.status == 401: raise InvalidAuth("Invalid API Key")
                 if resp.status == 204: return None
                 
+                # FIX: Handle 404s gracefully (especially for Sessions that just disconnected)
+                if resp.status == 404:
+                    return None
+
                 if resp.status >= 400:
                     try:
                         error_text = await resp.text()
@@ -118,6 +122,12 @@ class EmbyClient:
         if not self._user_id: return {}
         return await self.api_request("GET", f"Users/{self._user_id}/Items", params=params)
 
+    # ADDED: Dedicated single item fetch (Fixes Media Browser)
+    async def get_item(self, item_id: str) -> dict:
+        if not self._user_id: await self._find_user_id()
+        if not self._user_id: return {}
+        return await self.api_request("GET", f"Users/{self._user_id}/Items/{item_id}")
+
     def get_artwork_url(self, item_id: str, type: str = "Primary", max_width: int = 400) -> str:
         return f"{self._url}/Items/{item_id}/Images/{type}?maxHeight={max_width}&Quality=90"
 
@@ -147,7 +157,7 @@ class EmbyClient:
         if self._ws and not self._ws.closed:
             await self._ws.close()
             
-        self._listeners = {} # Clear refs
+        self._listeners = {} 
         _LOGGER.debug("Emby Client closed")
 
     async def _websocket_loop(self):
@@ -167,7 +177,6 @@ class EmbyClient:
                                 data = msg.json()
                                 msg_type = data.get("MessageType")
                                 
-                                # 1. Notify listeners for specific events
                                 if msg_type in self._listeners:
                                     for listener in self._listeners[msg_type]:
                                         try:
@@ -175,9 +184,8 @@ class EmbyClient:
                                         except Exception as e:
                                             _LOGGER.error(f"Error in listener for {msg_type}: {e}")
                                             
-                                # 2. Map generic 'Event' type messages (common in Emby)
                                 if msg_type == "Package" or msg_type == "ScheduledTasksInfo":
-                                    pass # Placeholder for future event handling
+                                    pass 
                                     
                             except ValueError:
                                 pass
@@ -186,5 +194,4 @@ class EmbyClient:
             except Exception as e:
                 _LOGGER.debug(f"WebSocket connection lost: {e}")
                 
-            # Reconnect delay
             await asyncio.sleep(10)
