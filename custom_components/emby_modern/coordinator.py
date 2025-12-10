@@ -101,8 +101,8 @@ class EmbyDataUpdateCoordinator(DataUpdateCoordinator):
             if not self._listeners: return
             self.hass.async_create_task(self.async_request_refresh())
 
-        # FIX: Added 'Playstate' and 'SessionData' to catch immediate pause/resume events
+        # FIX: Added 'Playstate' listener to catch immediate pause/resume events
         self.client.add_message_listener("Sessions", _trigger_refresh)
         self.client.add_message_listener("SessionData", _trigger_refresh)
-        self.client.add_message_listener("Playstate", _trigger_refresh) # Critical for Pause/Resume
+        self.client.add_message_listener("Playstate", _trigger_refresh) 
         self.client.add_message_listener("UserDataChanged", _trigger_refresh)
