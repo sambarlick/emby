@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Any
 import logging
 from homeassistant.components.media_player import BrowseError, BrowseMedia, MediaClass, MediaType
-from .const import CONTENT_TYPE_MAP, MEDIA_CLASS_MAP, PLAYABLE_MEDIA_TYPES
+# FIX: Removed PLAYABLE_MEDIA_TYPES from import (it is defined locally below)
+from .const import CONTENT_TYPE_MAP, MEDIA_CLASS_MAP
 from .emby_client import EmbyClient
 
 _LOGGER = logging.getLogger(__name__)
 
 # Ensure we use the official MediaType constants for playback compatibility
-# Note: Moved PLAYABLE_MEDIA_TYPES here or import if you put it in const.py
 PLAYABLE_MEDIA_TYPES = [
     MediaType.EPISODE, 
     MediaType.MOVIE, 
