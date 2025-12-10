@@ -70,13 +70,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
 
     # 1. Initialize Client 
+    # MERGE NOTE: Using Dev version (removed 'loop' arg to fix deprecation warning)
     client = EmbyClient(
         entry.data[CONF_HOST],
         entry.data[CONF_PORT],
         entry.data[CONF_API_KEY],
         entry.data[CONF_SSL],
-        hass.loop,
-        session
+        session=session
     )
 
     # 2. Validate Connection
@@ -151,7 +151,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         if entry.entry_id in hass.data[DOMAIN]:
-            # Close the WebSocket connection to prevent memory leaks
+            # MERGE NOTE: Using Dev version (Explicitly close client to prevent memory leaks)
             coordinator = hass.data[DOMAIN][entry.entry_id]
             await coordinator.client.close()
             
@@ -159,6 +159,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             
     return unload_ok
 
+# ------------------------------------------------------------------
+#  CRITICAL: DO NOT REMOVE THIS FUNCTION
+#  This allows the user to manually delete old/ghost Emby devices
+#  from the Home Assistant UI.
+# ------------------------------------------------------------------
 async def async_remove_config_entry_device(
     hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
 ) -> bool:
