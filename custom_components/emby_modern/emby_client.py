@@ -32,7 +32,8 @@ class EmbyClient:
         self._ws_url = f"{'wss' if ssl else 'ws'}://{host}:{port}/embywebsocket?api_key={api_key}&deviceId=homeassistant"
         self._ws = None
         self._listeners = {} # { "EventName": [callback_function] }
-        self._loop = loop or asyncio.get_event_loop()
+        # Store loop if provided, otherwise use running loop
+        self._loop = loop or asyncio.get_running_loop()
         self._ws_task = None
 
     async def validate_connection(self) -> dict:
@@ -126,13 +127,28 @@ class EmbyClient:
     def get_server_url(self):
         return self._url
 
-    # --- WebSocket Handling (ADDED) ---
+    # --- WebSocket Handling ---
 
     def add_message_listener(self, event_name: str, callback: Callable):
         """Register a callback for a specific WebSocket event."""
         if event_name not in self._listeners:
             self._listeners[event_name] = []
         self._listeners[event_name].append(callback)
+
+    async def close(self):
+        """Close the WebSocket connection and cancel the task."""
+        if self._ws_task:
+            self._ws_task.cancel()
+            try:
+                await self._ws_task
+            except asyncio.CancelledError:
+                pass
+        
+        if self._ws and not self._ws.closed:
+            await self._ws.close()
+            
+        self._listeners = {} # Clear refs
+        _LOGGER.debug("Emby Client closed")
 
     async def _websocket_loop(self):
         """Maintain WebSocket connection."""
