@@ -42,17 +42,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: Any, async_add_entities:
         if new_entities:
             async_add_entities(new_entities)
 
-    # Register listener for updates
     entry.async_on_unload(coordinator.async_add_listener(_async_update_media_players))
-    # Initial run
     _async_update_media_players()
 
 
 class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
     """Emby Media Player."""
     
-    # _attr_name is inherited as None, which is correct for the main device entity
-
     def __init__(self, coordinator, device_id, device_name, client_name, version):
         super().__init__(coordinator, device_id, device_name, client_name, version)
         self.session_id = None
@@ -240,14 +236,19 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
         """Set volume level, range 0..1."""
         emby_vol = int(volume * 100)
         if self.session_id:
+            # FIX: Send as both 'Volume' and 'Value', in both params and body
+            # This covers 99% of Emby client quirks.
             await self.coordinator.client.api_request(
                 "POST", 
                 f"Sessions/{self.session_id}/Command/SetVolume",
-                params={"Volume": emby_vol}
+                params={"Volume": emby_vol, "Value": emby_vol},
+                json_data={"Volume": emby_vol, "Value": emby_vol}
             )
-            # Optimistic state update
+            
+            # Optimistic update
             self.session_data.get("PlayState", {})["VolumeLevel"] = emby_vol
             self.async_write_ha_state()
+            
         await self.coordinator.async_request_refresh()
 
     async def async_volume_up(self) -> None:
