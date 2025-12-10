@@ -57,6 +57,8 @@ class EmbyServerButton(EmbyEntity, ButtonEntity):
         )
         self.entity_description = description
         self._attr_unique_id = f"{coordinator.entry.unique_id}-{description.key}"
+        # Entity name will be handled by base class + description.name 
+        # e.g. "Emby Server" + "Restart"
 
     async def async_press(self) -> None:
         if self.entity_description.key == "restart":
