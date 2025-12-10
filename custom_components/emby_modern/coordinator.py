@@ -50,7 +50,6 @@ class EmbyDataUpdateCoordinator(DataUpdateCoordinator):
             }
             
         except Exception as err:
-            # IMPORTANT: Re-raising the error here allows the sensor/switch to mark the server as UNAVAILABLE
             raise UpdateFailed(f"Error communicating with API: {err}")
 
     async def _process_library_item(self, item):
@@ -131,3 +130,19 @@ class EmbyDataUpdateCoordinator(DataUpdateCoordinator):
         """Register WebSocket listeners directly on the client for global events."""
         self.client.add_message_listener("ServerShuttingDown", courtesy_callback)
         self.client.add_message_listener("ServerRestarting", courtesy_callback)
+        
+        # --- NEW: Instant Updates for Playback/Sessions ---
+        @callback
+        def _trigger_refresh(data):
+            # Only trigger a refresh if we aren't already updating
+            # This prevents a "storm" of updates from freezing HA
+            if not self._listeners: 
+                return
+            
+            # Using call_soon_threadsafe or create_task ensures we don't block the websocket loop
+            self.hass.async_create_task(self.async_request_refresh())
+
+        # "Sessions" event fires on Play/Pause/Stop/TimeUpdate
+        self.client.add_message_listener("Sessions", _trigger_refresh)
+        self.client.add_message_listener("SessionData", _trigger_refresh)
+        self.client.add_message_listener("UserDataChanged", _trigger_refresh)
