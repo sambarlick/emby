@@ -58,13 +58,13 @@ class EmbyConfigFlow(ConfigFlow, domain=DOMAIN):
 
             session = async_get_clientsession(self.hass)
             
+            # FIX: Removed 'loop' argument to match updated EmbyClient
             client = EmbyClient(
                 user_input[CONF_HOST],
                 user_input[CONF_PORT],
                 user_input[CONF_API_KEY],
                 user_input[CONF_SSL],
-                self.hass.loop,
-                session,
+                session=session,
             )
 
             try:
@@ -80,7 +80,6 @@ class EmbyConfigFlow(ConfigFlow, domain=DOMAIN):
                     raise CannotConnect("No Server ID found")
 
                 # 3. Set Unique ID to prevent duplicates
-                # This ensures if you add it manually, SSDP won't discover it again
                 await self.async_set_unique_id(server_id)
                 self._abort_if_unique_id_configured()
 
@@ -122,10 +121,7 @@ class EmbyConfigFlow(ConfigFlow, domain=DOMAIN):
         if udn.startswith("uuid:"):
             udn = udn[5:]
         
-        # FIX: Remove hyphens to match Emby's internal System ID format
-        # SSDP sends: 416809c9-1f52...
-        # Emby API sends: 416809c91f52...
-        # We must normalize to the API format to prevent duplicates.
+        # Normalize UDN: Remove hyphens to match Emby's internal System ID format
         udn = udn.replace("-", "")
         
         # 2. Set the unique ID immediately
