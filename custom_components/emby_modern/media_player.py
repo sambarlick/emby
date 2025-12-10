@@ -57,24 +57,40 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
     @property
     def icon(self):
         """Dynamic icon based on device type or client name."""
+        # Normalize strings for comparison
         device_type = str(self.session_data.get("DeviceType", "")).lower()
         client = str(self.session_data.get("Client", "")).lower()
         d_name = (self._local_device_name or "").lower()
         
-        if any(x in client for x in ["android", "ios", "iphone", "ipad", "mobile"]) or \
-           any(x in device_type for x in ["mobile", "phone", "tablet", "ipad"]):
-            if "tablet" in device_type or "ipad" in client or "galaxy tab" in d_name:
-                 return "mdi:tablet"
-            return "mdi:cellphone"
-        if any(x in client for x in ["tv", "roku", "kodi", "lg", "samsung"]) or "tv" in device_type:
+        # 1. Check for TVs first (Most common overlap with Android)
+        if any(x in client for x in ["tv", "roku", "kodi", "lg", "samsung", "shield", "fire"]) or \
+           any(x in device_type for x in ["tv", "box"]) or \
+           "tv" in d_name:
             return "mdi:television"
-        if any(x in client for x in ["web", "chrome", "firefox", "edge", "browser"]) or "desktop" in device_type:
+            
+        # 2. Check for Tablets/iPads (Overlap with Mobile)
+        if any(x in client for x in ["ipad", "tablet"]) or \
+           any(x in device_type for x in ["tablet", "ipad"]) or \
+           "tablet" in d_name or "ipad" in d_name or "tab" in d_name:
+            return "mdi:tablet"
+
+        # 3. Check for Desktop/Web
+        if any(x in client for x in ["web", "chrome", "firefox", "edge", "browser"]) or \
+           "desktop" in device_type:
             return "mdi:monitor"
+
+        # 4. Check for Consoles
         if "xbox" in client or "xbox" in device_type:
             return "mdi:microsoft-xbox"
         if "ps4" in client or "ps5" in client or "playstation" in device_type:
             return "mdi:sony-playstation"
+
+        # 5. Fallback to Mobile if 'android' or 'ios' is detected last
+        if any(x in client for x in ["android", "ios", "iphone", "mobile"]) or \
+           any(x in device_type for x in ["mobile", "phone"]):
+            return "mdi:cellphone"
             
+        # 6. Default
         return "mdi:play-box-multiple"
 
     @property
@@ -120,21 +136,18 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
         item = self.session_data.get("NowPlayingItem", {})
         title = item.get("Name")
 
-        # Handle Episodes (SxxExx Title)
         if item.get("Type") == "Episode":
             s = item.get("ParentIndexNumber")
             e = item.get("IndexNumber")
             if s is not None and e is not None:
                 return f"S{s:02d}E{e:02d} {title}"
 
-        # Handle Movies (Title (Year))
         if item.get("Type") == "Movie":
             year = item.get("ProductionYear")
             if year is None:
                 premiere_date = item.get("PremiereDate", "")
                 if premiere_date and len(premiere_date) >= 4:
                     year = premiere_date[:4]
-            
             if year:
                 return f"{title} ({year})"
         
@@ -147,17 +160,14 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
 
     @property
     def media_season(self):
-        """Return None to prevent UI duplication on secondary line."""
         return None
 
     @property
     def media_episode(self):
-        """Return None to prevent UI duplication on secondary line."""
         return None
 
     @property
     def extra_state_attributes(self):
-        """Expose season/episode as attributes for automations."""
         item = self.session_data.get("NowPlayingItem", {})
         attrs = {}
         if item.get("ParentIndexNumber") is not None:
@@ -236,13 +246,12 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
         """Set volume level, range 0..1."""
         emby_vol = int(volume * 100)
         if self.session_id:
-            # FIX: Send as both 'Volume' and 'Value', in both params and body
-            # This covers 99% of Emby client quirks.
+            # FIX: Use the official 'Arguments' wrapper for JSON commands
+            # This is critical for Android TV and other strict clients
             await self.coordinator.client.api_request(
                 "POST", 
                 f"Sessions/{self.session_id}/Command/SetVolume",
-                params={"Volume": emby_vol, "Value": emby_vol},
-                json_data={"Volume": emby_vol, "Value": emby_vol}
+                json_data={"Arguments": {"Volume": emby_vol}}
             )
             
             # Optimistic update
