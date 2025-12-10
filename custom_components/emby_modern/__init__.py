@@ -23,7 +23,7 @@ PLATFORMS = [
     Platform.BUTTON,
     Platform.REMOTE,
     Platform.UPDATE,
-    Platform.SWITCH, # Included SWITCH to allow loading
+    Platform.SWITCH, 
 ]
 
 # Service schema definition
@@ -37,7 +37,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Emby Modern component and register global services."""
     hass.data.setdefault(DOMAIN, {})
 
-    # Service Function Definition (Needs to be defined here)
+    # Service Function Definition 
     async def send_message_service(call):
         message = call.data.get("message")
         header = call.data.get("header", "Home Assistant Alert")
@@ -119,7 +119,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # 6. Load Platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # 7. SETUP COURTESY MESSAGE LISTENER (FIXED BLOCK)
+    # 7. SETUP COURTESY MESSAGE LISTENER
     @callback
     def _handle_courtesy_message(data):
         switch_entity_id = f"switch.emby_server_{entry.entry_id}_shutdown_courtesy_mode"
@@ -151,6 +151,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         if entry.entry_id in hass.data[DOMAIN]:
+            # Close the WebSocket connection to prevent memory leaks
+            coordinator = hass.data[DOMAIN][entry.entry_id]
+            await coordinator.client.close()
+            
             hass.data[DOMAIN].pop(entry.entry_id)
             
     return unload_ok
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Allow removing a device from the device registry."""
+    return True
