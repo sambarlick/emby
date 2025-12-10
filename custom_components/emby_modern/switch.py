@@ -3,6 +3,7 @@ from __future__ import annotations
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity # ADDED
 from .entity import EmbyEntity
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddConfigEntryEntitiesCallback) -> None:
@@ -11,7 +12,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddC
     # The courtesy switch is a server-level feature (only one per server)
     async_add_entities([EmbyCourtesySwitch(coordinator)])
 
-class EmbyCourtesySwitch(EmbyEntity, SwitchEntity):
+class EmbyCourtesySwitch(EmbyEntity, SwitchEntity, RestoreEntity):
     """Switch to toggle the automatic 'Server Shutdown' message feature."""
     
     _attr_icon = "mdi:bell-alert-outline"
@@ -32,9 +33,14 @@ class EmbyCourtesySwitch(EmbyEntity, SwitchEntity):
     @property
     def is_on(self) -> bool:
         """Return the state of the switch."""
-        # For simplicity, we manage the state internally here. 
-        # For persistence across HA restarts, this should eventually use entry.options.
         return self._is_on
+
+    async def async_added_to_hass(self) -> None:
+        """Restore state on startup."""
+        await super().async_added_to_hass()
+        state = await self.async_get_last_state()
+        if state:
+            self._is_on = state.state == "on"
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn the switch on."""
