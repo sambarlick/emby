@@ -154,3 +154,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data[DOMAIN].pop(entry.entry_id)
             
     return unload_ok
+
+# ------------------------------------------------------------------
+#  CRITICAL: DO NOT REMOVE THIS FUNCTION
+#  This allows the user to manually delete old/ghost Emby devices
+#  from the Home Assistant UI.
+# ------------------------------------------------------------------
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Allow removing a device from the device registry."""
+    return True
