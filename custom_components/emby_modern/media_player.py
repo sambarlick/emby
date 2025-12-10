@@ -42,13 +42,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: Any, async_add_entities:
         if new_entities:
             async_add_entities(new_entities)
 
+    # Register listener for updates
     entry.async_on_unload(coordinator.async_add_listener(_async_update_media_players))
+    # Initial run
     _async_update_media_players()
 
 
 class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
     """Emby Media Player."""
-    _attr_name = None 
+    
+    # _attr_name is inherited as None, which is correct for the main device entity
 
     def __init__(self, coordinator, device_id, device_name, client_name, version):
         super().__init__(coordinator, device_id, device_name, client_name, version)
@@ -121,14 +124,14 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
         item = self.session_data.get("NowPlayingItem", {})
         title = item.get("Name")
 
-        # FIX: Handle Episodes (SxxExx Title)
+        # Handle Episodes (SxxExx Title)
         if item.get("Type") == "Episode":
             s = item.get("ParentIndexNumber")
             e = item.get("IndexNumber")
             if s is not None and e is not None:
                 return f"S{s:02d}E{e:02d} {title}"
 
-        # FIX: Handle Movies (Title (Year))
+        # Handle Movies (Title (Year))
         if item.get("Type") == "Movie":
             year = item.get("ProductionYear")
             if year is None:
@@ -183,7 +186,6 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
             MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.STOP |
             MediaPlayerEntityFeature.SEEK | MediaPlayerEntityFeature.PLAY |
             MediaPlayerEntityFeature.BROWSE_MEDIA | MediaPlayerEntityFeature.PLAY_MEDIA |
-            # ADDED: Volume Controls
             MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE |
             MediaPlayerEntityFeature.VOLUME_STEP
         )
@@ -221,12 +223,10 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
     async def async_browse_media(self, media_content_type=None, media_content_id=None) -> BrowseMedia:
         return await async_browse_media(self.hass, self.coordinator.client, media_content_type, media_content_id)
 
-    # ADDED: Volume Properties
     @property
     def volume_level(self) -> float | None:
         """Volume level of the media player (0..1)."""
         play_state = self.session_data.get("PlayState", {})
-        # Emby uses 0-100, HA needs 0.0-1.0
         if "VolumeLevel" in play_state:
             return play_state["VolumeLevel"] / 100
         return None
@@ -236,10 +236,8 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
         """Boolean if volume is currently muted."""
         return self.session_data.get("PlayState", {}).get("IsMuted", False)
 
-    # ADDED: Volume Methods
     async def async_set_volume_level(self, volume: float) -> None:
         """Set volume level, range 0..1."""
-        # Convert HA 0.0-1.0 back to Emby 0-100
         emby_vol = int(volume * 100)
         if self.session_id:
             await self.coordinator.client.api_request(
@@ -253,20 +251,16 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_volume_up(self) -> None:
-        """Volume up the media player."""
         await self._send_command_to_session("VolumeUp")
         
     async def async_volume_down(self) -> None:
-        """Volume down media player."""
         await self._send_command_to_session("VolumeDown")
 
     async def async_mute_volume(self, mute: bool) -> None:
-        """Mute (true) or unmute (false) media player."""
         command = "Mute" if mute else "Unmute"
         await self._send_command_to_session(command)
         
     async def _send_command_to_session(self, cmd):
-        """Helper to send general commands to the session."""
         if self.session_id:
             await self.coordinator.client.api_request("POST", f"Sessions/{self.session_id}/Command/{cmd}")
         await self.coordinator.async_request_refresh()
