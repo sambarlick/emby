@@ -1,11 +1,12 @@
 """Data update coordinator."""
 from __future__ import annotations
 import logging
+import asyncio
 from datetime import timedelta
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from .emby_client import EmbyClient
-from homeassistant.core import callback # ADDED: Required for event handlers
+from homeassistant.core import callback
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,72 +31,17 @@ class EmbyDataUpdateCoordinator(DataUpdateCoordinator):
             libraries = []
             folders = await self.client.get_media_folders()
             
-            # 2. Process Libraries
+            # 2. Process Libraries (Parallelized)
             if folders and "Items" in folders:
+                tasks = []
                 for item in folders["Items"]:
-                    col_type = item.get("CollectionType", "unknown")
-                    
-                    # --- A. LIVE TV LOGIC ---
-                    if col_type == "livetv":
-                        # Fetch Channels with Current Program Info
-                        channels_resp = await self.client.api_request(
-                            "GET", 
-                            "LiveTv/Channels", 
-                            params={"Limit": 30, "EnableImages": "false"} 
-                        )
-                        
-                        channel_data = []
-                        if channels_resp and "Items" in channels_resp:
-                            for ch in channels_resp["Items"]:
-                                name = ch.get("Name", "Unknown")
-                                # Try to get current program
-                                prog = ch.get("CurrentProgram", {}).get("Name", "Off Air")
-                                channel_data.append({"name": name, "program": prog})
-
-                        libraries.append({
-                            "Id": item["Id"],
-                            "Name": item["Name"],
-                            "Type": col_type,
-                            "Count": channels_resp.get("TotalRecordCount", 0) if channels_resp else 0,
-                            "LatestItems": channel_data 
-                        })
-
-                    # --- B. STANDARD MEDIA LOGIC (Movies, TV, etc) ---
-                    else:
-                        # Get Total Count
-                        count_resp = await self.client.get_items(
-                            params={
-                                "ParentId": item["Id"], 
-                                "Recursive": "true", 
-                                "IncludeItemTypes": "Movie,Series,Episode,Audio,Video", 
-                                "Limit": 0
-                            }
-                        )
-                        
-                        # Get Latest Items
-                        latest_resp = await self.client.get_items(
-                            params={
-                                "ParentId": item["Id"], 
-                                "Recursive": "true", 
-                                "Limit": 5, 
-                                "SortBy": "DateCreated", 
-                                "SortOrder": "Descending", 
-                                "IncludeItemTypes": "Movie,Series,Episode,Audio,Video"
-                            }
-                        )
-                        
-                        latest_items = []
-                        if latest_resp and "Items" in latest_resp:
-                            # FIX: Pass the full dictionary object so sensor.py can format it
-                            latest_items = latest_resp["Items"]
-
-                        libraries.append({
-                            "Id": item["Id"],
-                            "Name": item["Name"],
-                            "Type": col_type,
-                            "Count": count_resp.get("TotalRecordCount", 0),
-                            "LatestItems": latest_items
-                        })
+                    tasks.append(self._process_library_item(item))
+                
+                # Run all library fetches at once
+                results = await asyncio.gather(*tasks)
+                
+                # Filter out any failures (None)
+                libraries = [lib for lib in results if lib is not None]
 
             return {
                 "sessions": sessions or [], 
@@ -107,6 +53,75 @@ class EmbyDataUpdateCoordinator(DataUpdateCoordinator):
             # IMPORTANT: Re-raising the error here allows the sensor/switch to mark the server as UNAVAILABLE
             raise UpdateFailed(f"Error communicating with API: {err}")
 
+    async def _process_library_item(self, item):
+        """Helper to process a single library item."""
+        try:
+            col_type = item.get("CollectionType", "unknown")
+            
+            # --- A. LIVE TV LOGIC ---
+            if col_type == "livetv":
+                # Fetch Channels with Current Program Info
+                channels_resp = await self.client.api_request(
+                    "GET", 
+                    "LiveTv/Channels", 
+                    params={"Limit": 30, "EnableImages": "false"} 
+                )
+                
+                channel_data = []
+                if channels_resp and "Items" in channels_resp:
+                    for ch in channels_resp["Items"]:
+                        name = ch.get("Name", "Unknown")
+                        # Try to get current program
+                        prog = ch.get("CurrentProgram", {}).get("Name", "Off Air")
+                        channel_data.append({"name": name, "program": prog})
+
+                return {
+                    "Id": item["Id"],
+                    "Name": item["Name"],
+                    "Type": col_type,
+                    "Count": channels_resp.get("TotalRecordCount", 0) if channels_resp else 0,
+                    "LatestItems": channel_data 
+                }
+
+            # --- B. STANDARD MEDIA LOGIC (Movies, TV, etc) ---
+            else:
+                # Get Total Count
+                count_resp = await self.client.get_items(
+                    params={
+                        "ParentId": item["Id"], 
+                        "Recursive": "true", 
+                        "IncludeItemTypes": "Movie,Series,Episode,Audio,Video", 
+                        "Limit": 0
+                    }
+                )
+                
+                # Get Latest Items
+                latest_resp = await self.client.get_items(
+                    params={
+                        "ParentId": item["Id"], 
+                        "Recursive": "true", 
+                        "Limit": 5, 
+                        "SortBy": "DateCreated", 
+                        "SortOrder": "Descending", 
+                        "IncludeItemTypes": "Movie,Series,Episode,Audio,Video"
+                    }
+                )
+                
+                latest_items = []
+                if latest_resp and "Items" in latest_resp:
+                    latest_items = latest_resp["Items"]
+
+                return {
+                    "Id": item["Id"],
+                    "Name": item["Name"],
+                    "Type": col_type,
+                    "Count": count_resp.get("TotalRecordCount", 0) if count_resp else 0,
+                    "LatestItems": latest_items
+                }
+        except Exception as e:
+            _LOGGER.error(f"Error processing library {item.get('Name')}: {e}")
+            return None
+
     async def async_connect(self) -> None:
         await self.client.validate_connection()
         await self.async_config_entry_first_refresh()
@@ -114,8 +129,5 @@ class EmbyDataUpdateCoordinator(DataUpdateCoordinator):
     @callback
     def setup_global_listeners(self, courtesy_callback):
         """Register WebSocket listeners directly on the client for global events."""
-        
-        # This fixes the AttributeError from __init__.py by correctly calling the listener method
-        # on the client object, which the coordinator manages.
         self.client.add_message_listener("ServerShuttingDown", courtesy_callback)
         self.client.add_message_listener("ServerRestarting", courtesy_callback)
