@@ -53,13 +53,21 @@ class EmbyRemote(EmbyEntity, RemoteEntity):
         self.session_id = session_id
         # Remote entity needs a unique ID different from the media player
         self._attr_unique_id = f"remote-{session_id}"
-        self._attr_name = None # Use device name
+        # FIX: Give it a name so it becomes "Living Room TV Remote" instead of duplicate ID
+        self._attr_name = "Remote" 
+
+    @property
+    def available(self) -> bool:
+        """Return True if the session exists and coordinator is happy."""
+        if not super().available:
+            return False
+        current_ids = [s["Id"] for s in self.coordinator.data.get("sessions", [])]
+        return self.session_id in current_ids
 
     @property
     def is_on(self) -> bool:
         """Return true if the session is still active."""
-        current_ids = [s["Id"] for s in self.coordinator.data.get("sessions", [])]
-        return self.session_id in current_ids
+        return self.available
 
     async def async_send_command(self, command: Iterable[str], **kwargs: Any) -> None:
         """Send a command to the device."""
