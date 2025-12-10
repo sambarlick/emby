@@ -95,14 +95,30 @@ class EmbyDataUpdateCoordinator(DataUpdateCoordinator):
         self.client.add_message_listener("ServerShuttingDown", courtesy_callback)
         self.client.add_message_listener("ServerRestarting", courtesy_callback)
         
-        # --- NEW: Instant Updates for Playback/Sessions ---
+        # --- NEW: Direct Payload Ingestion (Zero Latency) ---
+        @callback
+        def _handle_sessions_update(data):
+            # The 'Sessions' message contains the full list of sessions in 'Data'.
+            # We can use this directly instead of calling the API.
+            new_sessions = data.get("Data")
+            if new_sessions and isinstance(new_sessions, list):
+                if not self.data: return
+                
+                # Update the data structure immediately
+                self.data["sessions"] = new_sessions
+                
+                # Notify HA listeners (Media Player entities) instantly
+                self.async_set_updated_data(self.data)
+        
         @callback
         def _trigger_refresh(data):
+            # For other events (like UserDataChanged) that don't carry the payload,
+            # we still need to fetch.
             if not self._listeners: return
             self.hass.async_create_task(self.async_request_refresh())
 
-        # FIX: Added 'Playstate' listener to catch immediate pause/resume events
-        self.client.add_message_listener("Sessions", _trigger_refresh)
-        self.client.add_message_listener("SessionData", _trigger_refresh)
-        self.client.add_message_listener("Playstate", _trigger_refresh) 
+        # Bind the direct handler to 'Sessions'
+        self.client.add_message_listener("Sessions", _handle_sessions_update)
+        
+        # Bind the refresh handler to others
         self.client.add_message_listener("UserDataChanged", _trigger_refresh)
