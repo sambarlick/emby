@@ -37,10 +37,7 @@ class EmbyDataUpdateCoordinator(DataUpdateCoordinator):
                 for item in folders["Items"]:
                     tasks.append(self._process_library_item(item))
                 
-                # Run all library fetches at once
                 results = await asyncio.gather(*tasks)
-                
-                # Filter out any failures (None)
                 libraries = [lib for lib in results if lib is not None]
 
             return {
@@ -56,66 +53,33 @@ class EmbyDataUpdateCoordinator(DataUpdateCoordinator):
         """Helper to process a single library item."""
         try:
             col_type = item.get("CollectionType", "unknown")
-            
-            # --- A. LIVE TV LOGIC ---
             if col_type == "livetv":
-                # Fetch Channels with Current Program Info
                 channels_resp = await self.client.api_request(
-                    "GET", 
-                    "LiveTv/Channels", 
-                    params={"Limit": 30, "EnableImages": "false"} 
+                    "GET", "LiveTv/Channels", params={"Limit": 30, "EnableImages": "false"} 
                 )
-                
                 channel_data = []
                 if channels_resp and "Items" in channels_resp:
                     for ch in channels_resp["Items"]:
                         name = ch.get("Name", "Unknown")
-                        # Try to get current program
                         prog = ch.get("CurrentProgram", {}).get("Name", "Off Air")
                         channel_data.append({"name": name, "program": prog})
 
                 return {
-                    "Id": item["Id"],
-                    "Name": item["Name"],
-                    "Type": col_type,
+                    "Id": item["Id"], "Name": item["Name"], "Type": col_type,
                     "Count": channels_resp.get("TotalRecordCount", 0) if channels_resp else 0,
                     "LatestItems": channel_data 
                 }
-
-            # --- B. STANDARD MEDIA LOGIC (Movies, TV, etc) ---
             else:
-                # Get Total Count
                 count_resp = await self.client.get_items(
-                    params={
-                        "ParentId": item["Id"], 
-                        "Recursive": "true", 
-                        "IncludeItemTypes": "Movie,Series,Episode,Audio,Video", 
-                        "Limit": 0
-                    }
+                    params={"ParentId": item["Id"], "Recursive": "true", "IncludeItemTypes": "Movie,Series,Episode,Audio,Video", "Limit": 0}
                 )
-                
-                # Get Latest Items
                 latest_resp = await self.client.get_items(
-                    params={
-                        "ParentId": item["Id"], 
-                        "Recursive": "true", 
-                        "Limit": 5, 
-                        "SortBy": "DateCreated", 
-                        "SortOrder": "Descending", 
-                        "IncludeItemTypes": "Movie,Series,Episode,Audio,Video"
-                    }
+                    params={"ParentId": item["Id"], "Recursive": "true", "Limit": 5, "SortBy": "DateCreated", "SortOrder": "Descending", "IncludeItemTypes": "Movie,Series,Episode,Audio,Video"}
                 )
-                
-                latest_items = []
-                if latest_resp and "Items" in latest_resp:
-                    latest_items = latest_resp["Items"]
-
                 return {
-                    "Id": item["Id"],
-                    "Name": item["Name"],
-                    "Type": col_type,
+                    "Id": item["Id"], "Name": item["Name"], "Type": col_type,
                     "Count": count_resp.get("TotalRecordCount", 0) if count_resp else 0,
-                    "LatestItems": latest_items
+                    "LatestItems": latest_resp.get("Items", []) if latest_resp else []
                 }
         except Exception as e:
             _LOGGER.error(f"Error processing library {item.get('Name')}: {e}")
@@ -134,15 +98,11 @@ class EmbyDataUpdateCoordinator(DataUpdateCoordinator):
         # --- NEW: Instant Updates for Playback/Sessions ---
         @callback
         def _trigger_refresh(data):
-            # Only trigger a refresh if we aren't already updating
-            # This prevents a "storm" of updates from freezing HA
-            if not self._listeners: 
-                return
-            
-            # Using call_soon_threadsafe or create_task ensures we don't block the websocket loop
+            if not self._listeners: return
             self.hass.async_create_task(self.async_request_refresh())
 
-        # "Sessions" event fires on Play/Pause/Stop/TimeUpdate
+        # FIX: Added 'Playstate' and 'SessionData' to catch immediate pause/resume events
         self.client.add_message_listener("Sessions", _trigger_refresh)
         self.client.add_message_listener("SessionData", _trigger_refresh)
+        self.client.add_message_listener("Playstate", _trigger_refresh) # Critical for Pause/Resume
         self.client.add_message_listener("UserDataChanged", _trigger_refresh)
