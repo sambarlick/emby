@@ -28,7 +28,6 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddC
             if session.get("Client") in IGNORED_CLIENTS: continue
             if not session.get("SupportsRemoteControl", False): continue
 
-            # Remotes use Session Id (not Device Id) because they are ephemeral
             session_id = session.get("Id")
             
             if session_id and session_id not in added_ids:
@@ -51,9 +50,7 @@ class EmbyRemote(EmbyEntity, RemoteEntity):
     def __init__(self, coordinator, session_id, device_id, device_name, client_name):
         super().__init__(coordinator, device_id, device_name, client_name)
         self.session_id = session_id
-        # Remote entity needs a unique ID different from the media player
         self._attr_unique_id = f"remote-{session_id}"
-        # FIX: Give it a name so it becomes "Living Room TV Remote" instead of duplicate ID
         self._attr_name = "Remote" 
 
     @property
@@ -69,6 +66,16 @@ class EmbyRemote(EmbyEntity, RemoteEntity):
         """Return true if the session is still active."""
         return self.available
 
+    # FIX: Added turn_on/off to prevent NotImplementedError crashes
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Do nothing, as we cannot usually turn on an Emby client remotely."""
+        # We implementation this to prevent the NotImplementedError crash
+        pass
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn the remote off (Stop Playback)."""
+        await self.coordinator.client.api_request("POST", f"Sessions/{self.session_id}/Playing/Stop")
+
     async def async_send_command(self, command: Iterable[str], **kwargs: Any) -> None:
         """Send a command to the device."""
         num_repeats = kwargs.get(ATTR_NUM_REPEATS, DEFAULT_NUM_REPEATS)
@@ -76,7 +83,6 @@ class EmbyRemote(EmbyEntity, RemoteEntity):
 
         for _ in range(num_repeats):
             for cmd in command:
-                # Map HA standard commands to Emby API commands
                 emby_cmd = cmd
                 
                 if cmd == "up": emby_cmd = "MoveUp"
@@ -88,18 +94,14 @@ class EmbyRemote(EmbyEntity, RemoteEntity):
                 elif cmd == "home": emby_cmd = "GoHome"
                 elif cmd == "menu": emby_cmd = "GoHome"
                 
-                # Logic Fix: Differentiate between Playstate vs General Commands
-                # 1. Playstate Commands (Stop, Pause, etc.) go to /Playing/{Command}
                 if emby_cmd in ["Stop", "Pause", "Unpause", "NextTrack", "PreviousTrack"]:
                      await self.coordinator.client.api_request("POST", f"Sessions/{self.session_id}/Playing/{emby_cmd}")
-                
-                # 2. General Commands (Up, Down, etc.) go to /Command with JSON body
                 else:
                      await self.coordinator.client.api_request(
                          "POST", 
                          f"Sessions/{self.session_id}/Command", 
-                         params={"Header": "Test", "Text": "Test"}, # Dummy params sometimes required by older clients
-                         json_data={"Name": emby_cmd} # Command goes in body
+                         params={"Header": "Test", "Text": "Test"},
+                         json_data={"Name": emby_cmd}
                      )
 
                 if delay > 0:
