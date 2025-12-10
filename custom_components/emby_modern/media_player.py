@@ -35,6 +35,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: Any, async_add_entities:
                 client_name = session.get("Client")
                 version = session.get("ApplicationVersion")
                 
+                # Debug Log for Icons
+                _LOGGER.debug(f"Discovered Player: {device_name} | Client: {client_name} | Type: {session.get('DeviceType')}")
+                
                 entity = EmbyMediaPlayer(coordinator, device_id, device_name, client_name, version)
                 new_entities.append(entity)
                 added_ids.add(device_id)
@@ -57,40 +60,40 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
     @property
     def icon(self):
         """Dynamic icon based on device type or client name."""
-        # Normalize strings for comparison
         device_type = str(self.session_data.get("DeviceType", "")).lower()
         client = str(self.session_data.get("Client", "")).lower()
         d_name = (self._local_device_name or "").lower()
         
-        # 1. Check for TVs first (Most common overlap with Android)
-        if any(x in client for x in ["tv", "roku", "kodi", "lg", "samsung", "shield", "fire"]) or \
+        # 1. TV Priorities
+        if any(x in client for x in ["tv", "roku", "kodi", "lg", "samsung", "shield", "fire", "androidtv"]) or \
            any(x in device_type for x in ["tv", "box"]) or \
            "tv" in d_name:
             return "mdi:television"
             
-        # 2. Check for Tablets/iPads (Overlap with Mobile)
-        if any(x in client for x in ["ipad", "tablet"]) or \
+        # 2. Tablet/iPad Priorities
+        if any(x in client for x in ["ipad", "tablet", "galaxy tab"]) or \
            any(x in device_type for x in ["tablet", "ipad"]) or \
            "tablet" in d_name or "ipad" in d_name or "tab" in d_name:
             return "mdi:tablet"
 
-        # 3. Check for Desktop/Web
-        if any(x in client for x in ["web", "chrome", "firefox", "edge", "browser"]) or \
+        # 3. Desktop Priorities
+        if any(x in client for x in ["web", "chrome", "firefox", "edge", "browser", "theater", "desktop"]) or \
            "desktop" in device_type:
             return "mdi:monitor"
 
-        # 4. Check for Consoles
+        # 4. Console Priorities
         if "xbox" in client or "xbox" in device_type:
             return "mdi:microsoft-xbox"
         if "ps4" in client or "ps5" in client or "playstation" in device_type:
             return "mdi:sony-playstation"
+        if "switch" in client or "nintendo" in device_type:
+            return "mdi:nintendo-switch"
 
-        # 5. Fallback to Mobile if 'android' or 'ios' is detected last
+        # 5. Mobile Priorities
         if any(x in client for x in ["android", "ios", "iphone", "mobile"]) or \
            any(x in device_type for x in ["mobile", "phone"]):
             return "mdi:cellphone"
             
-        # 6. Default
         return "mdi:play-box-multiple"
 
     @property
@@ -115,24 +118,17 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
 
     @property
     def media_content_type(self) -> MediaType | str | None:
-        """Return the content type. This triggers the correct UI layout."""
         item = self.session_data.get("NowPlayingItem", {})
         m_type = item.get("Type")
         
-        if m_type == "Episode":
-            return MediaType.TVSHOW
-        if m_type == "Movie":
-            return MediaType.MOVIE
-        if m_type == "Audio":
-            return MediaType.MUSIC
-        if m_type == "TvChannel":
-            return MediaType.CHANNEL
-            
+        if m_type == "Episode": return MediaType.TVSHOW
+        if m_type == "Movie": return MediaType.MOVIE
+        if m_type == "Audio": return MediaType.MUSIC
+        if m_type == "TvChannel": return MediaType.CHANNEL
         return MediaType.VIDEO
 
     @property
     def media_title(self):
-        """Return the title of current playing media."""
         item = self.session_data.get("NowPlayingItem", {})
         title = item.get("Name")
 
@@ -150,21 +146,16 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
                     year = premiere_date[:4]
             if year:
                 return f"{title} ({year})"
-        
         return title
 
     @property
     def media_series_title(self):
-        """Return the title of the series (TV)."""
         return self.session_data.get("NowPlayingItem", {}).get("SeriesName")
 
     @property
-    def media_season(self):
-        return None
-
+    def media_season(self): return None
     @property
-    def media_episode(self):
-        return None
+    def media_episode(self): return None
 
     @property
     def extra_state_attributes(self):
@@ -231,7 +222,6 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
 
     @property
     def volume_level(self) -> float | None:
-        """Volume level of the media player (0..1)."""
         play_state = self.session_data.get("PlayState", {})
         if "VolumeLevel" in play_state:
             return play_state["VolumeLevel"] / 100
@@ -239,21 +229,22 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
 
     @property
     def is_volume_muted(self) -> bool | None:
-        """Boolean if volume is currently muted."""
         return self.session_data.get("PlayState", {}).get("IsMuted", False)
 
     async def async_set_volume_level(self, volume: float) -> None:
         """Set volume level, range 0..1."""
         emby_vol = int(volume * 100)
         if self.session_id:
-            # FIX: Use the official 'Arguments' wrapper for JSON commands
-            # This is critical for Android TV and other strict clients
+            # FIX: Use the 'General Command' endpoint. 
+            # This is the "Nuclear Option" that works on stubborn clients (Shield/AndroidTV)
             await self.coordinator.client.api_request(
                 "POST", 
-                f"Sessions/{self.session_id}/Command/SetVolume",
-                json_data={"Arguments": {"Volume": emby_vol}}
+                f"Sessions/{self.session_id}/Command",
+                json_data={
+                    "Name": "SetVolume",
+                    "Arguments": {"Volume": emby_vol}
+                }
             )
-            
             # Optimistic update
             self.session_data.get("PlayState", {})["VolumeLevel"] = emby_vol
             self.async_write_ha_state()
