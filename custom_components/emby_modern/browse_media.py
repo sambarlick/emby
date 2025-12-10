@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 import logging
 from homeassistant.components.media_player import BrowseError, BrowseMedia, MediaClass, MediaType
-# FIX: Removed PLAYABLE_MEDIA_TYPES from import (it is defined locally below)
 from .const import CONTENT_TYPE_MAP, MEDIA_CLASS_MAP
 from .emby_client import EmbyClient
 
@@ -32,10 +31,7 @@ async def async_browse_media(hass, client: EmbyClient, media_content_type: str |
         raise BrowseError(f"Error browsing media: {err}")
 
 def item_payload(client: EmbyClient, item: dict[str, Any]) -> BrowseMedia | None:
-    """Create a BrowseMedia object for a single item. 
-    
-    Optimization: This is synchronous because it only manipulates dictionary data.
-    """
+    """Create a BrowseMedia object for a single item."""
     try:
         title = item.get("Name", "Unknown")
         thumbnail = None
@@ -71,7 +67,6 @@ def item_payload(client: EmbyClient, item: dict[str, Any]) -> BrowseMedia | None
             thumbnail=thumbnail,
         )
     except Exception as e:
-        # Log the specific item failure but return None so we don't crash the whole list
         _LOGGER.warning(f"Failed to parse item {item.get('Id', 'unknown')}: {e}")
         return None
 
@@ -82,7 +77,6 @@ async def build_root_response(client: EmbyClient) -> BrowseMedia:
         children = []
         if folders and "Items" in folders:
             for folder in folders["Items"]:
-                # payload is now sync, no await needed
                 payload = item_payload(client, folder)
                 if payload: 
                     children.append(payload)
@@ -104,14 +98,12 @@ async def build_root_response(client: EmbyClient) -> BrowseMedia:
 async def build_item_response(client: EmbyClient, media_content_type: str | None, media_content_id: str) -> BrowseMedia:
     """Build a response for a specific folder or item."""
     
-    # 1. Get details of the folder/item we are clicking
-    # FIX: EmbyClient does not have get_item(). We use get_items with an ID filter.
-    item_resp = await client.get_items(params={"Ids": media_content_id})
+    # FIX: Use get_item (singular) now that we added it to EmbyClient
+    item_details = await client.get_item(media_content_id)
     
-    if not item_resp or "Items" not in item_resp or not item_resp["Items"]:
+    if not item_details:
         raise BrowseError(f"Media item not found: {media_content_id}")
 
-    item_details = item_resp["Items"][0]
     title = item_details.get("Name", "Library")
     
     # Infer type if not provided
@@ -129,7 +121,7 @@ async def build_item_response(client: EmbyClient, media_content_type: str | None
     
     # Special Case: TV Series should sort by Season/Episode (ParentIndex/Index)
     if item_details.get("Type") == "Series":
-         params = {"ParentId": media_content_id} # Emby defaults to season order
+         params = {"ParentId": media_content_id} 
     
     # 3. Fetch Children
     children_data = await client.get_items(params)
@@ -137,7 +129,6 @@ async def build_item_response(client: EmbyClient, media_content_type: str | None
     
     if children_data and "Items" in children_data:
         for child in children_data["Items"]:
-            # payload is now sync, no await needed
             payload = item_payload(client, child)
             if payload: 
                 children.append(payload)
