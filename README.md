@@ -1,11 +1,11 @@
 # Emby (Modern) for Home Assistant
 
 ![Built with Gemini](https://img.shields.io/badge/Built%20with-Gemini-8E75B2?style=for-the-badge&logo=google-gemini&logoColor=white)
-[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/hacs/integration)
+[![Marketplace Custom](https://img.shields.io/badge/Marketplace-Custom-orange.svg?style=for-the-badge)](https://www.home-assistant.io/blog/2026/11/04/release-202611/)
 [![GitHub Release](https://img.shields.io/github/release/sambarlick/emby.svg?style=for-the-badge&color=blue)](https://github.com/sambarlick/emby/releases)
 [![Maintainer](https://img.shields.io/badge/maintainer-%40sambarlick-blue.svg?style=for-the-badge)](https://github.com/sambarlick)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=sambarlick&repository=emby&category=integration)
+[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=sambarlick&repository=emby&category=integration)
 
 ---
 
@@ -35,13 +35,16 @@ This integration focuses on stability, connection resilience, and using modern H
 
 ## 📥 Installation
 
-### Option 1: HACS (Recommended)
-1.  Open HACS in Home Assistant.
-2.  Click the **3 dots** in the top right -> **Custom repositories**.
-3.  Add the URL of this repository.
-4.  Category: **Integration**.
-5.  Click **Download**.
-6.  Restart Home Assistant.
+### Option 1: Marketplace (Recommended)
+Home Assistant 2026.11 and later include the Marketplace (formerly HACS).
+
+1.  Click the **Open your Home Assistant instance** button above, or go to **Settings** -> **Marketplace** -> **Add from link** and enter `https://github.com/sambarlick/emby`.
+2.  Download **Emby (Modern)**.
+3.  Restart Home Assistant.
+
+Updates appear under **Settings** -> **Updates**. A restart is needed after updating.
+
+On Home Assistant 2026.10 or earlier, add this repository as a custom repository in HACS (category: **Integration**) instead.
 
 ### Option 2: Manual
 1.  Download the latest release zip.
