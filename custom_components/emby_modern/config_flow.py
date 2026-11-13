@@ -7,9 +7,8 @@ from urllib.parse import urlparse
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT, CONF_API_KEY, CONF_SSL
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service_info.ssdp import SsdpServiceInfo
 
@@ -18,78 +17,76 @@ from .emby_client import EmbyClient, CannotConnect, InvalidAuth
 
 _LOGGER = logging.getLogger(__name__)
 
+DEFAULT_PORT = 8096
+
+
+def _clean_input(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Normalise the host field: strip whitespace, protocol and trailing slash.
+
+    If the user typed https://, the SSL option is switched on for them.
+    """
+    data = dict(user_input)
+    host = data[CONF_HOST].strip()
+
+    if host.startswith("http://"):
+        host = host[7:]
+    elif host.startswith("https://"):
+        host = host[8:]
+        data[CONF_SSL] = True
+
+    data[CONF_HOST] = host.rstrip("/")
+
+    if CONF_API_KEY in data:
+        data[CONF_API_KEY] = data[CONF_API_KEY].strip()
+    return data
+
+
 class EmbyConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Emby Modern."""
 
     VERSION = 1
-    
+
     def __init__(self):
         """Initialize the config flow."""
         self._discovered_host: str | None = None
-        self._discovered_port: int = 8096
+        self._discovered_port: int = DEFAULT_PORT
+
+    async def _async_get_server_info(self, data: dict[str, Any]) -> tuple[str, str]:
+        """Connect with the given settings and return (server_id, server_name).
+
+        Uses a plain API call rather than validate_connection() so that no
+        background WebSocket is started from inside the config flow.
+
+        Raises CannotConnect or InvalidAuth.
+        """
+        client = EmbyClient(
+            data[CONF_HOST],
+            data[CONF_PORT],
+            data[CONF_API_KEY],
+            data[CONF_SSL],
+            self.hass.loop,
+            async_get_clientsession(self.hass),
+        )
+        try:
+            system_info = await client.get_system_info()
+        except TimeoutError as err:
+            raise CannotConnect("Timed out connecting to Emby") from err
+
+        server_id = system_info.get("Id")
+        if not server_id:
+            raise CannotConnect("No Server ID found")
+        return server_id, system_info.get("ServerName", "Emby Server")
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step (Manual Setup)."""
         errors: dict[str, str] = {}
 
-        # If the user has submitted the form
         if user_input is not None:
-            # --- INPUT CLEANING LOGIC ---
-            # 1. Strip whitespace
-            host = user_input[CONF_HOST].strip()
-            
-            # 2. Strip protocol (http:// or https://) to prevent connection errors
-            if host.startswith("http://"):
-                host = host[7:]
-            elif host.startswith("https://"):
-                host = host[8:]
-                # Be smart: if they typed https, check the SSL box for them!
-                user_input[CONF_SSL] = True
-            
-            # 3. Strip trailing slashes
-            if host.endswith("/"):
-                host = host[:-1]
-                
-            # Write cleaned host back to input
-            user_input[CONF_HOST] = host
-            # -----------------------------
-
-            session = async_get_clientsession(self.hass)
-            
-            client = EmbyClient(
-                user_input[CONF_HOST],
-                user_input[CONF_PORT],
-                user_input[CONF_API_KEY],
-                user_input[CONF_SSL],
-                self.hass.loop,
-                session,
-            )
-
+            user_input = _clean_input(user_input)
             try:
-                # 1. Test Connection
-                await client.validate_connection()
-
-                # 2. Fetch System Info to get the Unique Server ID
-                system_info = await client.get_system_info()
-                server_id = system_info.get("Id")
-                server_name = system_info.get("ServerName", "Emby Server")
-
-                if not server_id:
-                    raise CannotConnect("No Server ID found")
-
-                # 3. Set Unique ID to prevent duplicates
-                # This ensures if you add it manually, SSDP won't discover it again
-                await self.async_set_unique_id(server_id)
-                self._abort_if_unique_id_configured()
-
-                # 4. Create the Config Entry
-                return self.async_create_entry(
-                    title=server_name, 
-                    data=user_input
-                )
-
+                server_id, server_name = await self._async_get_server_info(user_input)
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except InvalidAuth:
@@ -97,8 +94,13 @@ class EmbyConfigFlow(ConfigFlow, domain=DOMAIN):
             except Exception as err:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception: %s", err)
                 errors["base"] = "unknown"
+            else:
+                # Unique ID prevents duplicates (and stops SSDP re-discovering
+                # a server that was added manually).
+                await self.async_set_unique_id(server_id)
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(title=server_name, data=user_input)
 
-        # Define schema with defaults (using discovered values if available)
         schema = vol.Schema(
             {
                 vol.Required(CONF_HOST, default=self._discovered_host or vol.UNDEFINED): str,
@@ -108,26 +110,76 @@ class EmbyConfigFlow(ConfigFlow, domain=DOMAIN):
             }
         )
 
-        # Show the form
-        return self.async_show_form(
-            step_id="user", 
-            data_schema=schema, 
-            errors=errors
+        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change the connection details of an existing entry.
+
+        Lets the user update host, port, HTTPS and (optionally) the API key
+        without deleting the integration. The server ID must match the
+        original, so entities, devices and automations are preserved.
+        """
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            # A blank API key means "keep the current one".
+            if not user_input.get(CONF_API_KEY, "").strip():
+                user_input[CONF_API_KEY] = entry.data[CONF_API_KEY]
+            user_input = _clean_input(user_input)
+
+            try:
+                server_id, _ = await self._async_get_server_info(user_input)
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except InvalidAuth:
+                errors["base"] = "invalid_auth"
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception: %s", err)
+                errors["base"] = "unknown"
+            else:
+                await self.async_set_unique_id(server_id)
+                self._abort_if_unique_id_mismatch(reason="wrong_server")
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={
+                        CONF_HOST: user_input[CONF_HOST],
+                        CONF_PORT: user_input[CONF_PORT],
+                        CONF_SSL: user_input[CONF_SSL],
+                        CONF_API_KEY: user_input[CONF_API_KEY],
+                    },
+                )
+
+        current = {**entry.data, **(user_input or {})}
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST, default=current[CONF_HOST]): str,
+                vol.Optional(CONF_PORT, default=current.get(CONF_PORT, DEFAULT_PORT)): int,
+                vol.Optional(CONF_API_KEY, default=""): str,
+                vol.Optional(CONF_SSL, default=current.get(CONF_SSL, False)): bool,
+            }
         )
 
-    async def async_step_ssdp(self, discovery_info: SsdpServiceInfo) -> FlowResult:
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={"name": entry.title},
+        )
+
+    async def async_step_ssdp(self, discovery_info: SsdpServiceInfo) -> ConfigFlowResult:
         """Handle SSDP discovery."""
         # 1. Parse the Unique ID (UDN)
         udn = discovery_info.upnp.get("udn", "")
         if udn.startswith("uuid:"):
             udn = udn[5:]
-        
-        # FIX: Remove hyphens to match Emby's internal System ID format
-        # SSDP sends: 416809c9-1f52...
-        # Emby API sends: 416809c91f52...
-        # We must normalize to the API format to prevent duplicates.
+
+        # SSDP sends 416809c9-1f52..., the Emby API sends 416809c91f52...
+        # Normalise to the API format to prevent duplicates.
         udn = udn.replace("-", "")
-        
+
         # 2. Set the unique ID immediately
         await self.async_set_unique_id(udn)
         self._abort_if_unique_id_configured()

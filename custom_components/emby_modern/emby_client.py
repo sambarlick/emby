@@ -126,6 +126,24 @@ class EmbyClient:
     def get_server_url(self):
         return self._url
 
+    async def close(self) -> None:
+        """Stop the WebSocket task and close the socket.
+
+        Called on unload/reload so a reconfigured entry does not leave the
+        old connection running against the previous host.
+        """
+        if self._ws_task:
+            self._ws_task.cancel()
+            try:
+                await self._ws_task
+            except (asyncio.CancelledError, Exception):  # pylint: disable=broad-except
+                pass
+            self._ws_task = None
+        if self._ws is not None and not self._ws.closed:
+            await self._ws.close()
+        self._ws = None
+        self._listeners.clear()
+
     # --- WebSocket Handling (ADDED) ---
 
     def add_message_listener(self, event_name: str, callback: Callable):

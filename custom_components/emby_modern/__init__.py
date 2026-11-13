@@ -93,7 +93,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # 3. Setup Coordinator
     coordinator = EmbyDataUpdateCoordinator(hass, client, entry)
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except Exception:
+        # Setup will be retried; don't leave the WebSocket running meanwhile.
+        await client.close()
+        raise
 
     # 4. Store references
     entry.runtime_data = coordinator
@@ -150,8 +155,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        if entry.entry_id in hass.data[DOMAIN]:
-            hass.data[DOMAIN].pop(entry.entry_id)
+        coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
+        if coordinator is not None:
+            # Stop the WebSocket so a reload (e.g. after reconfigure) does not
+            # leave the old connection running against the previous host.
+            await coordinator.client.close()
             
     return unload_ok
 

@@ -14,6 +14,20 @@
           "host": "The IP address (e.g., 192.168.1.5) or hostname of your server.",
           "api_key": "A dedicated API key created in your Emby Dashboard."
         }
+      },
+      "reconfigure": {
+        "title": "Update connection to {name}",
+        "description": "Change the address or credentials Home Assistant uses to reach this Emby server. Your devices, entities and automations are kept.",
+        "data": {
+          "host": "Server IP or Hostname",
+          "port": "Port",
+          "api_key": "API Key",
+          "ssl": "Use Secure Connection (HTTPS)"
+        },
+        "data_description": {
+          "host": "The new IP address (e.g., 192.168.1.5) or hostname of your server.",
+          "api_key": "Leave blank to keep the current API key."
+        }
       }
     },
     "error": {
@@ -23,7 +37,9 @@
     },
     "abort": {
       "already_configured": "This Emby server is already configured.",
-      "no_url": "Could not discover Emby URL."
+      "no_url": "Could not discover Emby URL.",
+      "reconfigure_successful": "Connection details updated. The integration has been reloaded.",
+      "wrong_server": "That address belongs to a different Emby server. To switch servers, add it as a new integration instead."
     }
   }
 }

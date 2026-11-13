@@ -56,6 +56,15 @@ This integration focuses on stability, connection resilience, and using modern H
 3.  If not discovered, click **Add Integration** and search for **Emby (Modern)**.
 4.  Enter your Host (IP) and API Key.
 
+### Changing the server address
+If your Emby server's IP address, port or API key changes, you don't need to remove the integration:
+
+1.  Go to **Settings** -> **Devices & Services** -> **Emby (Modern)**.
+2.  Open the **⋮** menu on the server entry and choose **Reconfigure**.
+3.  Enter the new details. Leave the API Key blank to keep the current one.
+
+Your devices, entities and automations are kept. The new address must point to the same Emby server; to switch to a different server, add it as a new integration.
+
 ## Credits
 * **Architect & Maintainer:** @sambarlick
 * **Code Generation:** Google Gemini (AI)
