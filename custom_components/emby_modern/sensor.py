@@ -64,12 +64,11 @@ class EmbyServerStatusSensor(EmbyEntity, SensorEntity):
         await super().async_added_to_hass()
         
         # Subscribe to Emby WebSocket events handled by the client object
-        # Note: Ensure your EmbyClient supports 'add_message_listener'
         try:
             self.coordinator.client.add_message_listener("ServerRestarting", self._handle_restart_shutdown)
             self.coordinator.client.add_message_listener("ServerShuttingDown", self._handle_restart_shutdown)
         except AttributeError:
-             pass # Gracefully fail if client doesn't support websockets yet
+             pass 
         
         # Reset state when coordinator successfully reconnects after a failure
         self.coordinator.async_add_listener(self._handle_coordinator_update)

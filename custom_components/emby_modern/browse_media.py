@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import Any
 import logging
 from homeassistant.components.media_player import BrowseError, BrowseMedia, MediaClass, MediaType
-from .const import CONTENT_TYPE_MAP, MEDIA_CLASS_MAP, MEDIA_TYPE_NONE, SUPPORTED_COLLECTION_TYPES
+from .const import CONTENT_TYPE_MAP, MEDIA_CLASS_MAP
 from .emby_client import EmbyClient
 
 _LOGGER = logging.getLogger(__name__)
 
-# FIX: Ensure we use the official MediaType constants for playback compatibility
+# Ensure we use the official MediaType constants for playback compatibility
 PLAYABLE_MEDIA_TYPES = [
     MediaType.EPISODE, 
     MediaType.MOVIE, 
@@ -19,6 +19,7 @@ PLAYABLE_MEDIA_TYPES = [
 ]
 
 async def async_browse_media(hass, client: EmbyClient, media_content_type: str | None, media_content_id: str | None) -> BrowseMedia:
+    """Browse media on the Emby server."""
     # Robust check for Root
     if media_content_id in [None, "", "media-source://emby_modern", "root"]:
         return await build_root_response(client)
@@ -29,7 +30,8 @@ async def async_browse_media(hass, client: EmbyClient, media_content_type: str |
         _LOGGER.error("Error browsing media id '%s': %s", media_content_id, err)
         raise BrowseError(f"Error browsing media: {err}")
 
-async def item_payload(client: EmbyClient, item: dict[str, Any]) -> BrowseMedia | None:
+def item_payload(client: EmbyClient, item: dict[str, Any]) -> BrowseMedia | None:
+    """Create a BrowseMedia object for a single item."""
     try:
         title = item.get("Name", "Unknown")
         thumbnail = None
@@ -65,18 +67,19 @@ async def item_payload(client: EmbyClient, item: dict[str, Any]) -> BrowseMedia 
             thumbnail=thumbnail,
         )
     except Exception as e:
-        # Log the specific item failure but return None so we don't crash the whole list
         _LOGGER.warning(f"Failed to parse item {item.get('Id', 'unknown')}: {e}")
         return None
 
 async def build_root_response(client: EmbyClient) -> BrowseMedia:
+    """Build the root level view (Libraries)."""
     try:
         folders = await client.get_media_folders()
         children = []
-        if "Items" in folders:
+        if folders and "Items" in folders:
             for folder in folders["Items"]:
-                payload = await item_payload(client, folder)
-                if payload: children.append(payload)
+                payload = item_payload(client, folder)
+                if payload: 
+                    children.append(payload)
 
         return BrowseMedia(
             media_content_id="",
@@ -93,8 +96,11 @@ async def build_root_response(client: EmbyClient) -> BrowseMedia:
          raise BrowseError(f"Failed to build root: {e}")
 
 async def build_item_response(client: EmbyClient, media_content_type: str | None, media_content_id: str) -> BrowseMedia:
-    # 1. Get details of the folder/item we are clicking
+    """Build a response for a specific folder or item."""
+    
+    # FIX: Use get_item (singular) now that we added it to EmbyClient
     item_details = await client.get_item(media_content_id)
+    
     if not item_details:
         raise BrowseError(f"Media item not found: {media_content_id}")
 
@@ -115,7 +121,7 @@ async def build_item_response(client: EmbyClient, media_content_type: str | None
     
     # Special Case: TV Series should sort by Season/Episode (ParentIndex/Index)
     if item_details.get("Type") == "Series":
-         params = {"ParentId": media_content_id} # Emby defaults to season order
+         params = {"ParentId": media_content_id} 
     
     # 3. Fetch Children
     children_data = await client.get_items(params)
@@ -123,8 +129,7 @@ async def build_item_response(client: EmbyClient, media_content_type: str | None
     
     if children_data and "Items" in children_data:
         for child in children_data["Items"]:
-            # FIX: Only append valid children. If item_payload fails (returns None), skip it.
-            payload = await item_payload(client, child)
+            payload = item_payload(client, child)
             if payload: 
                 children.append(payload)
 
@@ -138,4 +143,3 @@ async def build_item_response(client: EmbyClient, media_content_type: str | None
         children=children,
         thumbnail=thumbnail,
     )
-    

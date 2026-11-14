@@ -64,8 +64,7 @@ class EmbyConfigFlow(ConfigFlow, domain=DOMAIN):
             data[CONF_PORT],
             data[CONF_API_KEY],
             data[CONF_SSL],
-            self.hass.loop,
-            async_get_clientsession(self.hass),
+            session=async_get_clientsession(self.hass),
         )
         try:
             system_info = await client.get_system_info()

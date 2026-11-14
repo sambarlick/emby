@@ -23,7 +23,7 @@ PLATFORMS = [
     Platform.BUTTON,
     Platform.REMOTE,
     Platform.UPDATE,
-    Platform.SWITCH, # Included SWITCH to allow loading
+    Platform.SWITCH, 
 ]
 
 # Service schema definition
@@ -37,7 +37,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Emby Modern component and register global services."""
     hass.data.setdefault(DOMAIN, {})
 
-    # Service Function Definition (Needs to be defined here)
+    # Service Function Definition 
     async def send_message_service(call):
         message = call.data.get("message")
         header = call.data.get("header", "Home Assistant Alert")
@@ -70,13 +70,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
 
     # 1. Initialize Client 
+    # MERGE NOTE: Using Dev version (removed 'loop' arg to fix deprecation warning)
     client = EmbyClient(
         entry.data[CONF_HOST],
         entry.data[CONF_PORT],
         entry.data[CONF_API_KEY],
         entry.data[CONF_SSL],
-        hass.loop,
-        session
+        session=session
     )
 
     # 2. Validate Connection
@@ -124,7 +124,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # 6. Load Platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # 7. SETUP COURTESY MESSAGE LISTENER (FIXED BLOCK)
+    # 7. SETUP COURTESY MESSAGE LISTENER
     @callback
     def _handle_courtesy_message(data):
         switch_entity_id = f"switch.emby_server_{entry.entry_id}_shutdown_courtesy_mode"

@@ -19,23 +19,18 @@ class EmbyServerUpdate(EmbyEntity, UpdateEntity):
     """Emby Server Update Entity."""
 
     _attr_supported_features = UpdateEntityFeature.INSTALL | UpdateEntityFeature.PROGRESS
-    _attr_icon = "mdi:update"
+    # Removed _attr_icon so it uses defaults (which works best with Brands/Themes)
 
     def __init__(self, coordinator):
-        # FIX: device_id=None allows the base class to use the Server UUID
+        # device_id=None allows the base class to use the Server UUID
         super().__init__(
             coordinator, 
             device_id=None, 
             client_name="Emby Server"
         )
-        self._attr_name = "Emby Server Update"
+        self._attr_name = "Update" # Logic: Device Name (Emby Server) + "Update"
         self._attr_unique_id = f"{coordinator.entry.unique_id}-update"
         self._attr_title = "Emby Server"
-
-    @property
-    def entity_picture(self):
-        """Force no image so the icon displays."""
-        return None
 
     @property
     def installed_version(self) -> str | None:

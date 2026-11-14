@@ -35,6 +35,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: Any, async_add_entities:
                 client_name = session.get("Client")
                 version = session.get("ApplicationVersion")
                 
+                # Debug Log for Icons
+                _LOGGER.debug(f"Discovered Player: {device_name} | Client: {client_name} | Type: {session.get('DeviceType')}")
+                
                 entity = EmbyMediaPlayer(coordinator, device_id, device_name, client_name, version)
                 new_entities.append(entity)
                 added_ids.add(device_id)
@@ -48,8 +51,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Any, async_add_entities:
 
 class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
     """Emby Media Player."""
-    _attr_name = None 
-
+    
     def __init__(self, coordinator, device_id, device_name, client_name, version):
         super().__init__(coordinator, device_id, device_name, client_name, version)
         self.session_id = None
@@ -62,19 +64,35 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
         client = str(self.session_data.get("Client", "")).lower()
         d_name = (self._local_device_name or "").lower()
         
-        if any(x in client for x in ["android", "ios", "iphone", "ipad", "mobile"]) or \
-           any(x in device_type for x in ["mobile", "phone", "tablet", "ipad"]):
-            if "tablet" in device_type or "ipad" in client or "galaxy tab" in d_name:
-                 return "mdi:tablet"
-            return "mdi:cellphone"
-        if any(x in client for x in ["tv", "roku", "kodi", "lg", "samsung"]) or "tv" in device_type:
+        # 1. TV Priorities
+        if any(x in client for x in ["tv", "roku", "kodi", "lg", "samsung", "shield", "fire", "androidtv"]) or \
+           any(x in device_type for x in ["tv", "box"]) or \
+           "tv" in d_name:
             return "mdi:television"
-        if any(x in client for x in ["web", "chrome", "firefox", "edge", "browser"]) or "desktop" in device_type:
+            
+        # 2. Tablet/iPad Priorities
+        if any(x in client for x in ["ipad", "tablet", "galaxy tab"]) or \
+           any(x in device_type for x in ["tablet", "ipad"]) or \
+           "tablet" in d_name or "ipad" in d_name or "tab" in d_name:
+            return "mdi:tablet"
+
+        # 3. Desktop Priorities
+        if any(x in client for x in ["web", "chrome", "firefox", "edge", "browser", "theater", "desktop"]) or \
+           "desktop" in device_type:
             return "mdi:monitor"
+
+        # 4. Console Priorities
         if "xbox" in client or "xbox" in device_type:
             return "mdi:microsoft-xbox"
         if "ps4" in client or "ps5" in client or "playstation" in device_type:
             return "mdi:sony-playstation"
+        if "switch" in client or "nintendo" in device_type:
+            return "mdi:nintendo-switch"
+
+        # 5. Mobile Priorities
+        if any(x in client for x in ["android", "ios", "iphone", "mobile"]) or \
+           any(x in device_type for x in ["mobile", "phone"]):
+            return "mdi:cellphone"
             
         return "mdi:play-box-multiple"
 
@@ -100,65 +118,47 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
 
     @property
     def media_content_type(self) -> MediaType | str | None:
-        """Return the content type. This triggers the correct UI layout."""
         item = self.session_data.get("NowPlayingItem", {})
         m_type = item.get("Type")
         
-        if m_type == "Episode":
-            return MediaType.TVSHOW
-        if m_type == "Movie":
-            return MediaType.MOVIE
-        if m_type == "Audio":
-            return MediaType.MUSIC
-        if m_type == "TvChannel":
-            return MediaType.CHANNEL
-            
+        if m_type == "Episode": return MediaType.TVSHOW
+        if m_type == "Movie": return MediaType.MOVIE
+        if m_type == "Audio": return MediaType.MUSIC
+        if m_type == "TvChannel": return MediaType.CHANNEL
         return MediaType.VIDEO
 
     @property
     def media_title(self):
-        """Return the title of current playing media."""
         item = self.session_data.get("NowPlayingItem", {})
         title = item.get("Name")
 
-        # FIX: Handle Episodes (SxxExx Title)
         if item.get("Type") == "Episode":
             s = item.get("ParentIndexNumber")
             e = item.get("IndexNumber")
             if s is not None and e is not None:
                 return f"S{s:02d}E{e:02d} {title}"
 
-        # FIX: Handle Movies (Title (Year))
         if item.get("Type") == "Movie":
             year = item.get("ProductionYear")
             if year is None:
                 premiere_date = item.get("PremiereDate", "")
                 if premiere_date and len(premiere_date) >= 4:
                     year = premiere_date[:4]
-            
             if year:
                 return f"{title} ({year})"
-        
         return title
 
     @property
     def media_series_title(self):
-        """Return the title of the series (TV)."""
         return self.session_data.get("NowPlayingItem", {}).get("SeriesName")
 
     @property
-    def media_season(self):
-        """Return None to prevent UI duplication on secondary line."""
-        return None
-
+    def media_season(self): return None
     @property
-    def media_episode(self):
-        """Return None to prevent UI duplication on secondary line."""
-        return None
+    def media_episode(self): return None
 
     @property
     def extra_state_attributes(self):
-        """Expose season/episode as attributes for automations."""
         item = self.session_data.get("NowPlayingItem", {})
         attrs = {}
         if item.get("ParentIndexNumber") is not None:
@@ -183,7 +183,6 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
             MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.STOP |
             MediaPlayerEntityFeature.SEEK | MediaPlayerEntityFeature.PLAY |
             MediaPlayerEntityFeature.BROWSE_MEDIA | MediaPlayerEntityFeature.PLAY_MEDIA |
-            # ADDED: Volume Controls
             MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE |
             MediaPlayerEntityFeature.VOLUME_STEP
         )
@@ -221,52 +220,48 @@ class EmbyMediaPlayer(EmbyEntity, MediaPlayerEntity):
     async def async_browse_media(self, media_content_type=None, media_content_id=None) -> BrowseMedia:
         return await async_browse_media(self.hass, self.coordinator.client, media_content_type, media_content_id)
 
-    # ADDED: Volume Properties
     @property
     def volume_level(self) -> float | None:
-        """Volume level of the media player (0..1)."""
         play_state = self.session_data.get("PlayState", {})
-        # Emby uses 0-100, HA needs 0.0-1.0
         if "VolumeLevel" in play_state:
             return play_state["VolumeLevel"] / 100
         return None
 
     @property
     def is_volume_muted(self) -> bool | None:
-        """Boolean if volume is currently muted."""
         return self.session_data.get("PlayState", {}).get("IsMuted", False)
 
-    # ADDED: Volume Methods
     async def async_set_volume_level(self, volume: float) -> None:
         """Set volume level, range 0..1."""
-        # Convert HA 0.0-1.0 back to Emby 0-100
         emby_vol = int(volume * 100)
         if self.session_id:
+            # FIX: Use the 'General Command' endpoint. 
+            # This is the "Nuclear Option" that works on stubborn clients (Shield/AndroidTV)
             await self.coordinator.client.api_request(
                 "POST", 
-                f"Sessions/{self.session_id}/Command/SetVolume",
-                params={"Volume": emby_vol}
+                f"Sessions/{self.session_id}/Command",
+                json_data={
+                    "Name": "SetVolume",
+                    "Arguments": {"Volume": emby_vol}
+                }
             )
-            # Optimistic state update
+            # Optimistic update
             self.session_data.get("PlayState", {})["VolumeLevel"] = emby_vol
             self.async_write_ha_state()
+            
         await self.coordinator.async_request_refresh()
 
     async def async_volume_up(self) -> None:
-        """Volume up the media player."""
         await self._send_command_to_session("VolumeUp")
         
     async def async_volume_down(self) -> None:
-        """Volume down media player."""
         await self._send_command_to_session("VolumeDown")
 
     async def async_mute_volume(self, mute: bool) -> None:
-        """Mute (true) or unmute (false) media player."""
         command = "Mute" if mute else "Unmute"
         await self._send_command_to_session(command)
         
     async def _send_command_to_session(self, cmd):
-        """Helper to send general commands to the session."""
         if self.session_id:
             await self.coordinator.client.api_request("POST", f"Sessions/{self.session_id}/Command/{cmd}")
         await self.coordinator.async_request_refresh()

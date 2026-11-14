@@ -16,7 +16,7 @@ send_message:
     timeout_ms:
       description: How long the message stays on screen (in milliseconds).
       required: false
-      default: 5000
+      default: 500
       selector:
         number:
           min: 1000
