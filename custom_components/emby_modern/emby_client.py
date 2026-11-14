@@ -100,7 +100,9 @@ class EmbyClient:
         """Find a user ID to use for user-scoped queries (library, browse)."""
         try:
             users = await self.api_request("GET", "Users/Query", params={"IsDisabled": "false"})
-            items = (users or {}).get("Items") if isinstance(users, dict) else users
+            if not users:
+                users = await self.api_request("GET", "Users")
+            items = users.get("Items") if isinstance(users, dict) else users
             if items:
                 admins = [u for u in items if u.get("Policy", {}).get("IsAdministrator")]
                 self._user_id = (admins or items)[0]["Id"]
