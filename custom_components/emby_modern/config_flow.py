@@ -64,9 +64,20 @@ async def _server_info(hass, data: Mapping[str, Any]) -> tuple[str, str]:
     return info["Id"], info.get("ServerName", "Emby Server")
 
 
+def _sort_key(item: tuple[str, dict], selected: Mapping[str, Any]) -> tuple:
+    """Ticked first (A-Z), then connected now, then by last seen, newest first."""
+    device_id, info = item
+    if device_id in selected:
+        return (0, info["name"].lower(), "")
+    if not info.get("last_seen"):  # in a session right now
+        return (1, info["name"].lower(), "")
+    return (2, "", "".join(chr(255 - ord(c)) for c in info["last_seen"]))
+
+
 def _clients_schema(known: dict[str, dict], selected: Mapping[str, Any]) -> vol.Schema:
-    choices = {**dict(selected), **known}
-    options = [{"value": device_id, "label": client_label(info)} for device_id, info in choices.items()]
+    choices = {**{k: v for k, v in selected.items()}, **known}
+    ordered = sorted(choices.items(), key=lambda item: _sort_key(item, selected))
+    options = [{"value": device_id, "label": client_label(info)} for device_id, info in ordered]
     return vol.Schema({
         vol.Optional(CONF_CLIENTS, default=list(selected)): SelectSelector(
             SelectSelectorConfig(options=options, multiple=True, mode=SelectSelectorMode.LIST)

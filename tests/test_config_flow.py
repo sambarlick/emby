@@ -77,3 +77,13 @@ async def test_options_flow(hass, entry, fake_emby):
     assert set(entry.options[CONF_CLIENTS]) == {"dev-lounge", "dev-firefox-1"}
     assert hass.states.get("media_player.firefox") is not None
     assert hass.states.get("media_player.shield") is None
+
+
+async def test_picker_order(hass, entry, fake_emby):
+    fake_emby.devices.append({"Id": "3", "ReportedDeviceId": "dev-old", "Name": "Old Phone", "AppName": "Emby", "DateLastActivity": "2026-01-01T00:00:00Z"})
+    fake_emby.devices.append({"Id": "4", "ReportedDeviceId": "dev-new", "Name": "Aardvark", "AppName": "Emby", "DateLastActivity": "2026-11-12T00:00:00Z"})
+    await setup(hass, entry)
+    r = await hass.config_entries.options.async_init(entry.entry_id)
+    order = [o["value"] for o in r["data_schema"].schema[CONF_CLIENTS].config["options"]]
+    # ticked A-Z, then connected now, then last seen newest first
+    assert order == ["dev-lounge", "dev-shield", "dev-firefox-1", "dev-new", "dev-old"]
