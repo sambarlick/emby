@@ -1,6 +1,7 @@
 # Emby (Modern) for Home Assistant
 
 ![Built with Gemini](https://img.shields.io/badge/Built%20with-Gemini-8E75B2?style=for-the-badge&logo=google-gemini&logoColor=white)
+![Built with Claude](https://img.shields.io/badge/Built%20with-Claude-D97757?style=for-the-badge&logo=claude&logoColor=white)
 [![Marketplace Custom](https://img.shields.io/badge/Marketplace-Custom-orange.svg?style=for-the-badge)](https://www.home-assistant.io/blog/2026/11/04/release-202611/)
 [![GitHub Release](https://img.shields.io/github/release/sambarlick/emby.svg?style=for-the-badge&color=blue)](https://github.com/sambarlick/emby/releases)
 [![Maintainer](https://img.shields.io/badge/maintainer-%40sambarlick-blue.svg?style=for-the-badge)](https://github.com/sambarlick)
@@ -70,5 +71,5 @@ Your devices, entities and automations are kept. The new address must point to t
 
 ## Credits
 * **Architect & Maintainer:** @sambarlick
-* **Code Generation:** Google Gemini (AI)
+* **Code Generation:** Google Gemini (AI), Anthropic Claude (AI)
 * **Inspiration:** The official Jellyfin Home Assistant integration architecture.
