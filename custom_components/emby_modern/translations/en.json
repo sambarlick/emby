@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "user": {
         "title": "Connect to Emby",
@@ -15,6 +16,16 @@
           "api_key": "A dedicated API key created in your Emby Dashboard."
         }
       },
+      "clients": {
+        "title": "Choose Emby clients",
+        "description": "Pick the Emby apps and devices you want in Home Assistant. Emby often creates a new client for each browser, so you probably don't want them all.",
+        "data": {
+          "clients": "Emby clients"
+        },
+        "data_description": {
+          "clients": "Each ticked client becomes a device in Home Assistant, even when it's offline. Clients you don't tick are ignored. You can change this later under the settings cog."
+        }
+      },
       "reconfigure": {
         "title": "Update connection to {name}",
         "description": "Change the address or credentials Home Assistant uses to reach this Emby server. Your devices, entities and automations are kept.",
@@ -28,6 +39,13 @@
           "host": "The new IP address (e.g., 192.168.1.5) or hostname of your server.",
           "api_key": "Leave blank to keep the current API key."
         }
+      },
+      "reauth_confirm": {
+        "title": "Emby API key needed",
+        "description": "{name} no longer accepts the API key Home Assistant is using. Create a new key in your Emby Dashboard under **Advanced > API Keys** and enter it below.",
+        "data": {
+          "api_key": "API Key"
+        }
       }
     },
     "error": {
@@ -39,7 +57,71 @@
       "already_configured": "This Emby server is already configured.",
       "no_url": "Could not discover Emby URL.",
       "reconfigure_successful": "Connection details updated. The integration has been reloaded.",
+      "reauth_successful": "API key updated. The integration has been reloaded.",
       "wrong_server": "That address belongs to a different Emby server. To switch servers, add it as a new integration instead."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Emby clients",
+        "description": "Choose which Emby clients are devices in Home Assistant. Unticking a client removes its device and entities.",
+        "data": {
+          "clients": "Emby clients"
+        },
+        "data_description": {
+          "clients": "Each ticked client becomes a device in Home Assistant, even when it's offline. Clients you don't tick are ignored. You can change this later under the settings cog."
+        }
+      }
+    }
+  },
+  "issues": {
+    "new_client": {
+      "title": "New Emby client: {name}",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Add {name}?",
+            "description": "{name} ({app}) connected to {server} but isn't in Home Assistant. Submit to add it as a device, or choose Ignore to stop seeing this notice."
+          }
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "server_status": {
+        "state": {
+          "running": "Running",
+          "restarting": "Restarting",
+          "shutting_down": "Shutting down",
+          "unreachable": "Unreachable"
+        }
+      }
+    }
+  },
+  "services": {
+    "send_message": {
+      "name": "Send message",
+      "description": "Shows a pop-up message on connected Emby clients.",
+      "fields": {
+        "message": {
+          "name": "Message",
+          "description": "The text to show."
+        },
+        "header": {
+          "name": "Header",
+          "description": "The message title."
+        },
+        "timeout_ms": {
+          "name": "Timeout",
+          "description": "How long the message stays on screen."
+        },
+        "config_entry_id": {
+          "name": "Emby server",
+          "description": "Only send to clients of this server. Leave empty for all servers."
+        }
+      }
     }
   }
 }

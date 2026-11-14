@@ -1,53 +1,64 @@
-"""Support for Emby switches."""
+"""Shutdown Courtesy Mode: warn viewers before the server restarts or shuts down."""
 from __future__ import annotations
+
+import logging
+from typing import Any
+
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity # ADDED
-from .entity import EmbyEntity
+from homeassistant.helpers.restore_state import RestoreEntity
+
+from .emby_client import CannotConnect
+from .entity import EmbyServerEntity
+
+_LOGGER = logging.getLogger(__name__)
+
+MESSAGES = {
+    "ServerRestarting": "Emby Server is restarting. Playback will be interrupted shortly.",
+    "ServerShuttingDown": "Emby Server is shutting down. Playback will be interrupted shortly.",
+}
+
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddConfigEntryEntitiesCallback) -> None:
-    coordinator = entry.runtime_data
-    
-    # The courtesy switch is a server-level feature (only one per server)
-    async_add_entities([EmbyCourtesySwitch(coordinator)])
+    async_add_entities([EmbyCourtesySwitch(entry.runtime_data)])
 
-class EmbyCourtesySwitch(EmbyEntity, SwitchEntity, RestoreEntity):
-    """Switch to toggle the automatic 'Server Shutdown' message feature."""
-    
+
+class EmbyCourtesySwitch(EmbyServerEntity, SwitchEntity, RestoreEntity):
+    """When on, sends a pop-up to every connected client before a restart or shutdown."""
+
+    _attr_name = "Shutdown Courtesy Mode"
     _attr_icon = "mdi:bell-alert-outline"
-    
-    def __init__(self, coordinator):
-        # Attach to the server's device entry
-        ver = coordinator.data.get("system_info", {}).get("Version", "Unknown")
-        super().__init__(
-            coordinator, 
-            device_id=None,
-            client_name="Emby Server", 
-            version=ver
-        )
-        self._attr_name = "Shutdown Courtesy Mode"
-        self._attr_unique_id = f"{coordinator.entry.unique_id}-courtesy-switch"
-        self._is_on = False  # Default to off
 
-    @property
-    def is_on(self) -> bool:
-        """Return the state of the switch."""
-        return self._is_on
+    def __init__(self, data) -> None:
+        super().__init__(data, data.sessions, "courtesy-switch")
+        self._attr_is_on = False
 
     async def async_added_to_hass(self) -> None:
-        """Restore state on startup."""
         await super().async_added_to_hass()
-        state = await self.async_get_last_state()
-        if state:
-            self._is_on = state.state == "on"
+        if (state := await self.async_get_last_state()) is not None:
+            self._attr_is_on = state.state == "on"
+        for message_type in MESSAGES:
+            self.async_on_remove(self.client.add_message_listener(message_type, self._on_server_event))
 
-    async def async_turn_on(self, **kwargs) -> None:
-        """Turn the switch on."""
-        self._is_on = True
+    @callback
+    def _on_server_event(self, message: dict) -> None:
+        if self.is_on:
+            self.hass.async_create_task(self._warn_viewers(MESSAGES[message["MessageType"]]))
+
+    async def _warn_viewers(self, text: str) -> None:
+        for sess in (self.coordinator.data or {}).get("sessions", []):
+            if not sess.get("SupportsRemoteControl"):
+                continue
+            try:
+                await self.client.send_message(sess["Id"], "Server notice", text, 10000)
+            except CannotConnect:
+                _LOGGER.debug("Couldn't warn %s", sess.get("DeviceName"))
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self._attr_is_on = True
         self.async_write_ha_state()
 
-    async def async_turn_off(self, **kwargs) -> None:
-        """Turn the switch off."""
-        self._is_on = False
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self._attr_is_on = False
         self.async_write_ha_state()

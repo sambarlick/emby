@@ -1,15 +1,38 @@
 """Constants for the Emby Modern integration."""
+from datetime import timedelta
+
 from homeassistant.components.media_player import MediaClass, MediaType
 
 DOMAIN = "emby_modern"
-CONF_CLIENT_DEVICE_ID = "client_device_id"
 
-# Needed for browse_media.py to skip ignored devices
-IGNORED_CLIENTS = [] 
+# Options
+CONF_CLIENTS = "clients"  # list of Emby DeviceIds the user selected
 
-# Needed for browse_media.py logic
-MEDIA_TYPE_NONE = "none"
+# Polling
+SESSION_SCAN_INTERVAL = timedelta(seconds=10)
+LIBRARY_SCAN_INTERVAL = timedelta(hours=1)
+UPDATE_CHECK_INTERVAL = timedelta(hours=6)
+LIBRARY_CHANGE_DEBOUNCE = 30  # seconds
 
+EMBY_RELEASES_URL = "https://api.github.com/repos/MediaBrowser/Emby.Releases/releases"
+
+# Item types counted per library CollectionType. The first type is the sensor
+# value; any others are exposed as attributes.
+LIBRARY_COUNT_TYPES: dict[str | None, list[str]] = {
+    "movies": ["Movie"],
+    "tvshows": ["Series", "Episode"],
+    "music": ["MusicAlbum", "Audio"],
+    "musicvideos": ["MusicVideo"],
+    "homevideos": ["Video", "Photo"],
+    "photos": ["Photo"],
+    "books": ["Book"],
+    "audiobooks": ["AudioBook"],
+    "boxsets": ["BoxSet"],
+    "playlists": ["Playlist"],
+}
+DEFAULT_COUNT_TYPES = ["Movie", "Series", "Video", "MusicVideo", "Audio", "Photo", "Book", "AudioBook"]
+
+# Media browsing
 CONTENT_TYPE_MAP = {
     "Movie": MediaType.MOVIE,
     "Episode": MediaType.EPISODE,
@@ -18,11 +41,13 @@ CONTENT_TYPE_MAP = {
     "MusicAlbum": MediaType.ALBUM,
     "Audio": MediaType.TRACK,
     "Video": MediaType.VIDEO,
+    "MusicVideo": MediaType.VIDEO,
     "TvChannel": MediaType.CHANNEL,
-    "Folder": "library",            # Critical for browsing
-    "CollectionFolder": "library",  # Critical for browsing
-    "UserView": "library",          # Critical for browsing
+    "Folder": "library",
+    "CollectionFolder": "library",
+    "UserView": "library",
     "BoxSet": "library",
+    "Playlist": MediaType.PLAYLIST,
 }
 
 MEDIA_CLASS_MAP = {
@@ -32,11 +57,15 @@ MEDIA_CLASS_MAP = {
     "Season": MediaClass.SEASON,
     "MusicAlbum": MediaClass.ALBUM,
     "Audio": MediaClass.TRACK,
+    "Video": MediaClass.VIDEO,
+    "MusicVideo": MediaClass.VIDEO,
     "Folder": MediaClass.DIRECTORY,
     "CollectionFolder": MediaClass.DIRECTORY,
     "UserView": MediaClass.DIRECTORY,
     "TvChannel": MediaClass.CHANNEL,
     "BoxSet": MediaClass.DIRECTORY,
+    "Playlist": MediaClass.PLAYLIST,
 }
 
-SUPPORTED_COLLECTION_TYPES = ["movies", "tvshows", "music", "musicvideos", "homevideos", "livetv"]
+PLAYABLE_TYPES = {"Movie", "Episode", "Audio", "Video", "MusicVideo", "TvChannel"}
+EXPANDABLE_TYPES = {"Series", "Season", "MusicAlbum", "BoxSet", "CollectionFolder", "UserView", "Folder", "Playlist"}

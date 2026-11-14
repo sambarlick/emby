@@ -1,238 +1,166 @@
-"""Support for Emby sensors."""
+"""Emby sensors: server status, active streams and one per library."""
 from __future__ import annotations
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+
+from datetime import timedelta
+
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from .entity import EmbyEntity
+from homeassistant.util import dt as dt_util
 
-# Define the possible states
-EMBY_STATE_RUNNING = "Running"
-EMBY_STATE_RESTARTING = "Restarting"
-EMBY_STATE_SHUTTING_DOWN = "Shutting Down"
-EMBY_STATE_UNAVAILABLE = "Unavailable"
+from .entity import EmbyServerEntity
+
+STATUS_RUNNING = "running"
+STATUS_RESTARTING = "restarting"
+STATUS_SHUTTING_DOWN = "shutting_down"
+STATUS_UNREACHABLE = "unreachable"
+STATUS_OPTIONS = [STATUS_RUNNING, STATUS_RESTARTING, STATUS_SHUTTING_DOWN, STATUS_UNREACHABLE]
+
+LIBRARY_ICONS = {
+    "movies": "mdi:movie", "tvshows": "mdi:television-classic", "music": "mdi:music",
+    "musicvideos": "mdi:music-box", "photos": "mdi:image", "homevideos": "mdi:video",
+    "books": "mdi:book", "audiobooks": "mdi:book-music", "livetv": "mdi:television",
+    "boxsets": "mdi:movie-open", "playlists": "mdi:playlist-play",
+}
+
+
+def _episode_label(item: dict) -> str:
+    season, episode = item.get("ParentIndexNumber"), item.get("IndexNumber")
+    if season is not None and episode is not None:
+        return f"S{season:02d}:E{episode:02d} - {item.get('Name')}"
+    return item.get("Name", "Unknown")
+
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddConfigEntryEntitiesCallback) -> None:
-    coordinator = entry.runtime_data
-    entities = []
-    
-    # 1. Add the Active Streams Sensor
-    entities.append(EmbyActiveStreamsSensor(coordinator))
-    
-    # 2. Add the Server Status Sensor
-    entities.append(EmbyServerStatusSensor(coordinator))
-    
-    # 3. Add a Sensor for every Library found
-    libraries = coordinator.data.get("libraries", [])
-    for lib in libraries:
-        entities.append(EmbyLibrarySensor(coordinator, lib))
-
+    data = entry.runtime_data
+    entities: list[SensorEntity] = [EmbyServerStatusSensor(data), EmbyActiveStreamsSensor(data)]
+    entities += [EmbyLibrarySensor(data, lib) for lib in (data.libraries.data or {}).values()]
     async_add_entities(entities)
 
-class EmbyServerStatusSensor(EmbyEntity, SensorEntity):
-    """Sensor to track the Emby server's operational status."""
-    
-    def __init__(self, coordinator):
-        ver = coordinator.data.get("system_info", {}).get("Version", "Unknown")
-        super().__init__(
-            coordinator, 
-            device_id=None,
-            client_name="Emby Server", 
-            version=ver
-        )
-        self._attr_name = "Server Status"
-        self._attr_unique_id = f"{coordinator.entry.unique_id}-server-status"
-        self._attr_icon = "mdi:server-network"
-        self._current_state = EMBY_STATE_RUNNING
+
+class EmbyServerStatusSensor(EmbyServerEntity, SensorEntity):
+    """Running, Restarting, Shutting down, or Unreachable."""
+
+    _attr_name = "Server Status"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = STATUS_OPTIONS
+    _attr_translation_key = "server_status"
+
+    def __init__(self, data) -> None:
+        super().__init__(data, data.sessions, "server-status")
+        self._event_state: str | None = None
+        self._seen_down = False
+        self._event_at = dt_util.utcnow()
+
+    @property
+    def available(self) -> bool:
+        return True  # "Unreachable" is a state, not unavailability
 
     @property
     def native_value(self) -> str:
-        """Return the current operational status."""
-        if not self.coordinator.last_update_success:
-            return EMBY_STATE_UNAVAILABLE
-        return self._current_state
+        if self._event_state:
+            return self._event_state
+        return STATUS_RUNNING if self.coordinator.last_update_success else STATUS_UNREACHABLE
 
     @property
-    def icon(self):
-        if self._current_state in [EMBY_STATE_RESTARTING, EMBY_STATE_SHUTTING_DOWN]:
-            return "mdi:server-network-off"
-        if not self.coordinator.last_update_success:
-             return "mdi:server-network-off"
-        return "mdi:server-network"
+    def icon(self) -> str:
+        return "mdi:server-network" if self.native_value == STATUS_RUNNING else "mdi:server-network-off"
 
-    async def async_added_to_hass(self):
-        """Subscribe to specific WebSocket events to update state instantly."""
+    async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        
-        # Subscribe to Emby WebSocket events handled by the client object
-        try:
-            self.coordinator.client.add_message_listener("ServerRestarting", self._handle_restart_shutdown)
-            self.coordinator.client.add_message_listener("ServerShuttingDown", self._handle_restart_shutdown)
-        except AttributeError:
-             pass 
-        
-        # Reset state when coordinator successfully reconnects after a failure
-        self.coordinator.async_add_listener(self._handle_coordinator_update)
+        self.async_on_remove(self.client.add_message_listener("ServerRestarting", self._on_event))
+        self.async_on_remove(self.client.add_message_listener("ServerShuttingDown", self._on_event))
 
     @callback
-    def _handle_restart_shutdown(self, data):
-        """Update sensor state based on the specific event."""
-        event_name = data.get("EventName")
-        if event_name == "ServerRestarting":
-            self._current_state = EMBY_STATE_RESTARTING
-        elif event_name == "ServerShuttingDown":
-            self._current_state = EMBY_STATE_SHUTTING_DOWN
-            
+    def _on_event(self, message: dict) -> None:
+        self._seen_down = False
+        self._event_at = dt_util.utcnow()
+        self._event_state = STATUS_RESTARTING if message.get("MessageType") == "ServerRestarting" else STATUS_SHUTTING_DOWN
         self.async_write_ha_state()
 
     @callback
-    def _handle_coordinator_update(self):
-        """Called when the coordinator successfully updates."""
-        # If we successfully update, the server is running again
-        if self.coordinator.last_update_success:
-            self._current_state = EMBY_STATE_RUNNING
-        else:
-            self._current_state = EMBY_STATE_UNAVAILABLE
-            
-        self.async_write_ha_state()
+    def _handle_coordinator_update(self) -> None:
+        # Clear "Restarting"/"Shutting down" once the server has been seen
+        # down and is answering again, or after 10 minutes as a safety net.
+        if self._event_state:
+            if not self.coordinator.last_update_success:
+                self._seen_down = True
+            elif self._seen_down or dt_util.utcnow() - self._event_at > timedelta(minutes=10):
+                self._event_state = None
+        super()._handle_coordinator_update()
 
-class EmbyActiveStreamsSensor(EmbyEntity, SensorEntity):
-    """Sensor to track active streams."""
-    
-    def __init__(self, coordinator):
-        ver = coordinator.data.get("system_info", {}).get("Version", "Unknown")
-        super().__init__(
-            coordinator, 
-            device_id=None, 
-            client_name="Emby Server", 
-            version=ver
-        )
-        self._attr_name = "Active Streams"
-        self._attr_unique_id = f"{coordinator.entry.unique_id}-active-streams"
-        self._attr_native_unit_of_measurement = "streams"
-        self._attr_state_class = SensorStateClass.MEASUREMENT
-        self._attr_icon = "mdi:play-network"
+
+class EmbyActiveStreamsSensor(EmbyServerEntity, SensorEntity):
+    _attr_name = "Active Streams"
+    _attr_icon = "mdi:play-network"
+    _attr_native_unit_of_measurement = "streams"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, data) -> None:
+        super().__init__(data, data.sessions, "active-streams")
+
+    @property
+    def _playing(self) -> list[dict]:
+        return [s for s in (self.coordinator.data or {}).get("sessions", []) if s.get("NowPlayingItem")]
 
     @property
     def native_value(self) -> int:
-        return sum(1 for sess in self.coordinator.data.get("sessions", []) if "NowPlayingItem" in sess)
+        return len(self._playing)
 
     @property
-    def extra_state_attributes(self):
+    def extra_state_attributes(self) -> dict:
         streams = []
-        for sess in self.coordinator.data.get("sessions", []):
-            if "NowPlayingItem" not in sess: continue
+        for sess in self._playing:
             item = sess["NowPlayingItem"]
-            title = item.get("Name")
-            
             if item.get("Type") == "Episode":
-                s = item.get("ParentIndexNumber")
-                e = item.get("IndexNumber")
-                if s is not None and e is not None:
-                    title = f"{item.get('SeriesName')} - S{s:02d}E{e:02d} - {title}"
+                title = f"{item.get('SeriesName')} {_episode_label(item)}"
             elif item.get("ProductionYear"):
-                title = f"{title} ({item.get('ProductionYear')})"
-            
-            streams.append({
-                "user": sess.get("UserName", "Unknown"),
-                "device": sess.get("DeviceName", "Unknown"),
-                "title": title,
-            })
+                title = f"{item.get('Name')} ({item['ProductionYear']})"
+            else:
+                title = item.get("Name")
+            streams.append({"user": sess.get("UserName"), "device": sess.get("DeviceName"), "title": title})
         return {"active_streams": streams}
 
-class EmbyLibrarySensor(EmbyEntity, SensorEntity):
-    """Sensor to track library items."""
 
-    def __init__(self, coordinator, lib_data):
-        ver = coordinator.data.get("system_info", {}).get("Version", "Unknown")
-        super().__init__(
-            coordinator, 
-            device_id=None, 
-            client_name="Emby Server", 
-            version=ver
-        )
-        self._lib_id = lib_data["Id"]
-        self._lib_name = lib_data["Name"]
-        self._lib_type = lib_data["Type"]
-        self._attr_name = self._lib_name
-        
-        self._attr_unique_id = f"{coordinator.entry.unique_id}-library-{self._lib_id}"
-        self._attr_native_unit_of_measurement = "items"
-        self._attr_state_class = SensorStateClass.TOTAL
+class EmbyLibrarySensor(EmbyServerEntity, SensorEntity):
+    """Item count for one library. Empty libraries start disabled."""
+
+    _attr_native_unit_of_measurement = "items"
+    _attr_state_class = SensorStateClass.TOTAL
+
+    def __init__(self, data, lib: dict) -> None:
+        super().__init__(data, data.libraries, f"library-{lib['Id']}")
+        self._lib_id = lib["Id"]
+        self._lib_type = lib["Type"]
+        self._attr_name = lib["Name"]
+        self._attr_icon = LIBRARY_ICONS.get(self._lib_type, "mdi:folder-multiple")
+        self._attr_entity_registry_enabled_default = lib.get("Count", 0) > 0
 
     @property
-    def icon(self):
-        t = self._lib_type.lower()
-        if "movie" in t: return "mdi:movie"
-        if "tv" in t or "series" in t: return "mdi:television-classic"
-        if "music" in t: return "mdi:music"
-        if "photo" in t: return "mdi:image"
-        if "book" in t: return "mdi:book"
-        return "mdi:folder-multiple"
+    def _lib(self) -> dict | None:
+        return (self.coordinator.data or {}).get(self._lib_id)
 
     @property
-    def native_value(self) -> int | str:
-        libraries = self.coordinator.data.get("libraries", [])
-        for lib in libraries:
-            if lib["Id"] == self._lib_id:
-                return lib["Count"]
-        return 0
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and self._lib is not None
 
     @property
-    def extra_state_attributes(self):
-        libraries = self.coordinator.data.get("libraries", [])
-        attrs = {}
-        items = []
+    def native_value(self) -> int | None:
+        return self._lib["Count"] if self._lib else None
 
-        for lib in libraries:
-            if lib["Id"] == self._lib_id:
-                items = lib.get("LatestItems", [])
-                break
-        
-        if not items:
-            if self.native_value == 0:
-                 return {"status": "Library is empty."}
+    @property
+    def extra_state_attributes(self) -> dict:
+        lib = self._lib or {}
+        attrs: dict = {f"{t.lower()}_count": c for t, c in lib.get("Counts", {}).items()}
+        latest = []
+        for item in lib.get("Latest", []):
+            if self._lib_type == "livetv":
+                latest.append(f"{item['Name']}: {item['Program']}")
+            elif item.get("Type") == "Episode":
+                latest.append(f"{item.get('SeriesName', '')} {_episode_label(item)}".strip())
+            elif item.get("ProductionYear"):
+                latest.append(f"{item.get('Name')} ({item['ProductionYear']})")
             else:
-                 return {"status": "No recently added items."}
-
-        if self._lib_type == "livetv":
-            for ch in items:
-                if isinstance(ch, dict):
-                    attrs[ch.get("name", "Unknown")] = ch.get("program", "Unknown")
-            return attrs
-
-        for item in items:
-            key_text = "Unknown"
-            value_text = ""
-
-            if isinstance(item, dict):
-                name = item.get("Name", "Unknown")
-                year = item.get("ProductionYear")
-                year_str = str(year) if year else ""
-
-                if item.get("Type") == "Episode":
-                    series = item.get("SeriesName", "Unknown Series")
-                    s = item.get("ParentIndexNumber")
-                    e = item.get("IndexNumber")
-                    if s is not None and e is not None:
-                        key_text = f"S{s:02d}E{e:02d} {name}"
-                    else:
-                        key_text = name
-                    value_text = series
-
-                else:
-                    key_text = name
-                    value_text = year_str if year_str else ""
-            
-            elif isinstance(item, str):
-                key_text = item
-                value_text = ""
-
-            key = key_text
-            count = 2
-            while key in attrs:
-                key = f"{key_text} ({count})"
-                count += 1
-            
-            attrs[key] = value_text
-            
+                latest.append(item.get("Name", "Unknown"))
+        attrs["latest" if self._lib_type != "livetv" else "channels"] = latest
         return attrs

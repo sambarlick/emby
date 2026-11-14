@@ -1,175 +1,233 @@
-"""The Emby Modern component."""
-import logging
-import asyncio
+"""The Emby Modern integration."""
+from __future__ import annotations
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_PORT, CONF_API_KEY, CONF_SSL, Platform
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers import config_validation as cv
+import logging
+import re
+
 import voluptuous as vol
 
-from .const import DOMAIN
-from .coordinator import EmbyDataUpdateCoordinator
-from .emby_client import EmbyClient, CannotConnect, InvalidAuth
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.const import CONF_API_KEY, CONF_HOST, CONF_PORT, CONF_SSL, Platform
+from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, ServiceValidationError
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util import slugify
+
+from .clients import async_clear_client_issues, async_flag_new_clients, selected_clients
+from .const import CONF_CLIENTS, DOMAIN
+from .coordinator import EmbyData, EmbyLibraryCoordinator, EmbyReleaseCoordinator, EmbySessionCoordinator
+from .emby_client import CannotConnect, EmbyClient, InvalidAuth
+from .entity import server_device_id
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [
-    Platform.MEDIA_PLAYER,
-    Platform.SENSOR,
     Platform.BUTTON,
+    Platform.MEDIA_PLAYER,
     Platform.REMOTE,
+    Platform.SENSOR,
+    Platform.SWITCH,
     Platform.UPDATE,
-    Platform.SWITCH, 
 ]
 
-# Service schema definition
-EMBY_SEND_MESSAGE_SCHEMA = vol.Schema({
+ATTR_CONFIG_ENTRY_ID = "config_entry_id"
+SEND_MESSAGE_SCHEMA = vol.Schema({
     vol.Required("message"): cv.string,
     vol.Optional("header", default="Home Assistant Alert"): cv.string,
-    vol.Optional("timeout_ms", default=5000): vol.Coerce(int),
+    vol.Optional("timeout_ms", default=5000): vol.All(vol.Coerce(int), vol.Range(min=1000, max=60000)),
+    vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
 })
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+type EmbyConfigEntry = ConfigEntry[EmbyData]
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Set up the Emby Modern component and register global services."""
-    hass.data.setdefault(DOMAIN, {})
+    """Register the send_message service."""
 
-    # Service Function Definition 
-    async def send_message_service(call):
-        message = call.data.get("message")
-        header = call.data.get("header", "Home Assistant Alert")
-        timeout = call.data.get("timeout_ms", 5000)
-        
-        # Use the first registered coordinator instance for the client access
-        coordinator = next(iter(hass.data[DOMAIN].values()), None)
-        if not coordinator:
-            _LOGGER.error("Cannot send message: No Emby coordinator instance found.")
-            return
+    async def send_message(call: ServiceCall) -> None:
+        entries = [
+            e for e in hass.config_entries.async_entries(DOMAIN)
+            if e.state is ConfigEntryState.LOADED
+            and (ATTR_CONFIG_ENTRY_ID not in call.data or e.entry_id == call.data[ATTR_CONFIG_ENTRY_ID])
+        ]
+        if not entries:
+            raise ServiceValidationError("No loaded Emby server matches")
+        for entry in entries:
+            data: EmbyData = entry.runtime_data
+            for sess in (data.sessions.data or {}).get("sessions", []):
+                if not sess.get("SupportsRemoteControl"):
+                    continue
+                try:
+                    await data.client.send_message(
+                        sess["Id"], call.data["header"], call.data["message"], call.data["timeout_ms"]
+                    )
+                except CannotConnect as err:
+                    _LOGGER.warning("Couldn't message %s: %s", sess.get("DeviceName"), err)
 
-        client = coordinator.client
-        sessions = coordinator.data.get("sessions", [])
-        
-        params = {"Header": header, "Text": message, "TimeoutMs": timeout}
-
-        for session in sessions:
-            try:
-                await client.api_request("POST", f"Sessions/{session['Id']}/Message", params=params)
-            except Exception as e:
-                _LOGGER.warning(f"Failed to send message to session {session.get('UserName')}: {e}")
-
-    # Register the service with the defined schema
-    hass.services.async_register(DOMAIN, "send_message", send_message_service, schema=EMBY_SEND_MESSAGE_SCHEMA)
-
+    hass.services.async_register(DOMAIN, "send_message", send_message, schema=SEND_MESSAGE_SCHEMA)
     return True
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Emby Modern from a config entry."""
-    session = async_get_clientsession(hass)
 
-    # 1. Initialize Client 
-    # MERGE NOTE: Using Dev version (removed 'loop' arg to fix deprecation warning)
+async def async_setup_entry(hass: HomeAssistant, entry: EmbyConfigEntry) -> bool:
     client = EmbyClient(
-        entry.data[CONF_HOST],
-        entry.data[CONF_PORT],
-        entry.data[CONF_API_KEY],
-        entry.data[CONF_SSL],
-        session=session
+        entry.data[CONF_HOST], entry.data[CONF_PORT], entry.data[CONF_API_KEY], entry.data[CONF_SSL],
+        session=async_get_clientsession(hass),
     )
-
-    # 2. Validate Connection
     try:
         await client.validate_connection()
-    except (CannotConnect, TimeoutError) as err:
-        raise ConfigEntryNotReady(f"Emby not ready: {err}") from err
     except InvalidAuth as err:
-        _LOGGER.error(f"Authentication failed: {err}")
-        return False
-    except Exception as err:
-        _LOGGER.error(f"Unexpected error connecting to Emby: {err}")
-        return False
+        raise ConfigEntryAuthFailed("Emby rejected the API key") from err
+    except CannotConnect as err:
+        raise ConfigEntryNotReady(f"Emby not reachable: {err}") from err
 
-    # 3. Setup Coordinator
-    coordinator = EmbyDataUpdateCoordinator(hass, client, entry)
-    try:
-        await coordinator.async_config_entry_first_refresh()
-    except Exception:
-        # Setup will be retried; don't leave the WebSocket running meanwhile.
-        await client.close()
-        raise
+    data = EmbyData(
+        client=client,
+        sessions=EmbySessionCoordinator(hass, entry, client),
+        libraries=EmbyLibraryCoordinator(hass, entry, client),
+        releases=EmbyReleaseCoordinator(hass, entry),
+    )
+    await data.sessions.async_config_entry_first_refresh()
+    await data.libraries.async_config_entry_first_refresh()
+    await data.releases.async_refresh()  # GitHub being down must not block setup
+    entry.runtime_data = data
 
-    # 4. Store references
-    entry.runtime_data = coordinator
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    _async_cleanup_registry(hass, entry)
 
-    # 5. Register the Main Device (The Server itself)
-    server_version = coordinator.data.get("system_info", {}).get("Version", "Unknown")
-    server_name = client.get_server_name() or "Emby Server"
-
-    device_identifier = entry.unique_id or entry.entry_id
-
-    device_registry = dr.async_get(hass)
-    device_registry.async_get_or_create(
+    # The server device must exist before client devices reference it.
+    info = (data.sessions.data or {}).get("system_info", {})
+    dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, device_identifier)},
-        manufacturer="Emby",
-        name=server_name,
-        model="Emby Server",
-        sw_version=server_version,
-        configuration_url=client.get_server_url(),
+        identifiers={(DOMAIN, server_device_id(entry))},
+        manufacturer="Emby", model="Emby Server", name=entry.title,
+        sw_version=info.get("Version"), configuration_url=client.get_server_url(),
     )
 
-    # 6. Load Platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # 7. SETUP COURTESY MESSAGE LISTENER
+    if not entry.data.get("entity_ids_migrated"):
+        _async_migrate_entity_ids(hass, entry)
+        hass.config_entries.async_update_entry(entry, data={**entry.data, "entity_ids_migrated": True})
+
+    # WebSocket: live session updates, and library refresh when media changes.
+    client.add_message_listener("Sessions", data.sessions.handle_sessions_push)
+
     @callback
-    def _handle_courtesy_message(data):
-        switch_entity_id = f"switch.emby_server_{entry.entry_id}_shutdown_courtesy_mode"
-        switch_state = hass.states.get(switch_entity_id)
+    def _library_changed(_message: dict) -> None:
+        hass.async_create_task(data.libraries.async_request_refresh())
 
-        if switch_state and switch_state.state == 'on':
-            event_type = "Restarting" if data.get("EventName") == "ServerRestarting" else "Shutting Down"
-            
-            # Call the registered service asynchronously
-            hass.async_create_task(
-                hass.services.async_call(
-                    DOMAIN,
-                    "send_message",
-                    {
-                        'message': f"System Alert: Emby Server is {event_type}. Services will be interrupted shortly.",
-                        'header': "SYSTEM SHUTDOWN ALERT",
-                        'timeout_ms': 10000
-                    },
-                    blocking=False
-                )
-            )
-            
-    coordinator.setup_global_listeners(_handle_courtesy_message)
+    client.add_message_listener("LibraryChanged", _library_changed)
+    client.start_websocket()
 
+    # Repairs notice for clients that connect but aren't selected.
+    seen: set[str] = set()
+
+    @callback
+    def _check_new_clients() -> None:
+        async_flag_new_clients(hass, entry, (data.sessions.data or {}).get("sessions", []), seen)
+
+    async_clear_client_issues(hass, entry)
+    _check_new_clients()
+    entry.async_on_unload(data.sessions.async_add_listener(_check_new_clients))
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
+
+async def _async_options_updated(hass: HomeAssistant, entry: EmbyConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: EmbyConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
-        if coordinator is not None:
-            # Stop the WebSocket so a reload (e.g. after reconfigure) does not
-            # leave the old connection running against the previous host.
-            await coordinator.client.close()
-            
+        # Stop the WebSocket so a reload (e.g. after reconfigure) doesn't leave
+        # the old connection running.
+        data = getattr(entry, "runtime_data", None)
+        if data is not None:
+            await data.client.close()
     return unload_ok
 
-# ------------------------------------------------------------------
-#  CRITICAL: DO NOT REMOVE THIS FUNCTION
-#  This allows the user to manually delete old/ghost Emby devices
-#  from the Home Assistant UI.
-# ------------------------------------------------------------------
-async def async_remove_config_entry_device(
-    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
-) -> bool:
-    """Allow removing a device from the device registry."""
+
+async def async_remove_config_entry_device(hass: HomeAssistant, entry: EmbyConfigEntry, device: dr.DeviceEntry) -> bool:
+    """Allow deleting a client device from the UI; also deselects it."""
+    server = server_device_id(entry)
+    ids = {i[1] for i in device.identifiers if i[0] == DOMAIN}
+    if server in ids:
+        return False
+    clients = {k: v for k, v in selected_clients(hass, entry).items() if k not in ids}
+    hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_CLIENTS: clients})
     return True
+
+
+# ----------------------------------------------------------------------
+# Upgrades
+# ----------------------------------------------------------------------
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """1.1 -> 1.2: keep the client devices users already have as selected clients."""
+    if entry.version > 1:
+        return False
+    if entry.minor_version < 2:
+        server = server_device_id(entry)
+        clients: dict[str, dict] = {}
+        for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id):
+            for domain, ident in device.identifiers:
+                if domain == DOMAIN and ident != server:
+                    clients[ident] = {"name": device.name or ident, "app": device.model}
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, CONF_CLIENTS: clients}, minor_version=2
+        )
+        _LOGGER.info("Emby: kept %d existing client devices as selected clients", len(clients))
+    return True
+
+
+@callback
+def _async_cleanup_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove per-session entities from older versions and deselected clients."""
+    ent_reg = er.async_get(hass)
+    for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if ent.unique_id.startswith(("remote-", "kill-")):
+            ent_reg.async_remove(ent.entity_id)
+
+    selected = set(selected_clients(hass, entry))
+    server = server_device_id(entry)
+    dev_reg = dr.async_get(hass)
+    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+        ids = {i[1] for i in device.identifiers if i[0] == DOMAIN}
+        if ids and server not in ids and not ids & selected:
+            dev_reg.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
+
+
+# Object IDs older versions generated that didn't include the device name.
+_LEGACY_IDS = {"emby_server_update", "emby", "emby_update"}
+
+
+@callback
+def _async_migrate_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Rename entity IDs older versions generated to '<device> <entity>' form.
+
+    Only IDs matching the old automatic pattern are changed, so IDs a user
+    picked themselves are left alone.
+    """
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        device = dev_reg.async_get(ent.device_id) if ent.device_id else None
+        if device is None:
+            continue
+        device_name = device.name_by_user or device.name or ""
+        object_id = ent.entity_id.split(".", 1)[1]
+        base = re.sub(r"_\d+$", "", object_id)
+        legacy = {slugify(ent.original_name or "")} | _LEGACY_IDS
+        if not (base in legacy or base.startswith("emby_modern_")):
+            continue
+        desired_name = f"{device_name} {ent.original_name}" if ent.original_name else device_name
+        desired = f"{ent.domain}.{slugify(desired_name)}"
+        if desired == ent.entity_id or ent_reg.async_get(desired):
+            continue
+        _LOGGER.info("Emby: renaming %s to %s", ent.entity_id, desired)
+        ent_reg.async_update_entity(ent.entity_id, new_entity_id=desired)

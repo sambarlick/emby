@@ -1,124 +1,187 @@
-"""Data update coordinator."""
+"""Data update coordinators for Emby Modern."""
 from __future__ import annotations
-import logging
+
 import asyncio
-from datetime import timedelta
+import logging
+from dataclasses import dataclass, field
+from typing import Any
+
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from .emby_client import EmbyClient
-from homeassistant.core import callback
+
+from .const import (
+    DEFAULT_COUNT_TYPES,
+    EMBY_RELEASES_URL,
+    LIBRARY_CHANGE_DEBOUNCE,
+    LIBRARY_COUNT_TYPES,
+    LIBRARY_SCAN_INTERVAL,
+    SESSION_SCAN_INTERVAL,
+    UPDATE_CHECK_INTERVAL,
+)
+from .emby_client import CannotConnect, EmbyClient, InvalidAuth
 
 _LOGGER = logging.getLogger(__name__)
 
-class EmbyDataUpdateCoordinator(DataUpdateCoordinator):
-    """Emby Data Update Coordinator."""
 
-    config_entry: ConfigEntry
+class EmbySessionCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    """Sessions and server info, polled every 10 s and pushed over the WebSocket."""
 
-    def __init__(self, hass, client: EmbyClient, entry: ConfigEntry) -> None:
-        self.client = client
-        self.entry = entry
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, client: EmbyClient) -> None:
         super().__init__(
-            hass, _LOGGER, name="Emby Data", update_interval=timedelta(seconds=10),
+            hass, _LOGGER, config_entry=entry, name="Emby sessions",
+            update_interval=SESSION_SCAN_INTERVAL,
+        )
+        self.client = client
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        try:
+            sessions, system_info = await asyncio.gather(
+                self.client.get_sessions(), self.client.get_system_info()
+            )
+        except InvalidAuth as err:
+            raise ConfigEntryAuthFailed("Emby rejected the API key") from err
+        except CannotConnect as err:
+            raise UpdateFailed(f"Cannot reach Emby: {err}") from err
+        if not system_info:
+            raise UpdateFailed("Emby returned no server info")
+        return {"sessions": sessions, "system_info": system_info}
+
+    @callback
+    def handle_sessions_push(self, message: dict) -> None:
+        """Apply a WebSocket 'Sessions' push.
+
+        Updates listeners without resetting the poll timer, so server info
+        keeps refreshing on schedule while pushes arrive.
+        """
+        sessions = message.get("Data")
+        if not isinstance(sessions, list) or not self.data:
+            return
+        self.data = {**self.data, "sessions": sessions}
+        self.async_update_listeners()
+
+
+class EmbyLibraryCoordinator(DataUpdateCoordinator[dict[str, dict]]):
+    """Library counts. Refreshed hourly and shortly after Emby reports a change."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, client: EmbyClient) -> None:
+        super().__init__(
+            hass, _LOGGER, config_entry=entry, name="Emby libraries",
+            update_interval=LIBRARY_SCAN_INTERVAL,
+            request_refresh_debouncer=Debouncer(
+                hass, _LOGGER, cooldown=LIBRARY_CHANGE_DEBOUNCE, immediate=False
+            ),
+        )
+        self.client = client
+        self._semaphore = asyncio.Semaphore(3)
+
+    async def _async_update_data(self) -> dict[str, dict]:
+        try:
+            folders = await self.client.get_media_folders()
+        except InvalidAuth as err:
+            raise ConfigEntryAuthFailed("Emby rejected the API key") from err
+        except CannotConnect as err:
+            raise UpdateFailed(f"Cannot reach Emby: {err}") from err
+
+        previous = self.data or {}
+        items = folders.get("Items", [])
+        results = await asyncio.gather(
+            *(self._fetch_library(item) for item in items), return_exceptions=True
+        )
+        libraries: dict[str, dict] = {}
+        for item, result in zip(items, results):
+            if isinstance(result, dict):
+                libraries[item["Id"]] = result
+            elif item["Id"] in previous:
+                # Keep the last good count rather than dropping to 0.
+                _LOGGER.debug("Library %s failed to refresh: %s", item.get("Name"), result)
+                libraries[item["Id"]] = previous[item["Id"]]
+        return libraries
+
+    async def _fetch_library(self, item: dict) -> dict:
+        async with self._semaphore:
+            col_type = item.get("CollectionType")
+            base = {"Id": item["Id"], "Name": item["Name"], "Type": col_type or "mixed"}
+
+            if col_type == "livetv":
+                channels = await self.client.get_live_tv_channels()
+                return {
+                    **base,
+                    "Count": channels.get("TotalRecordCount", 0),
+                    "Counts": {},
+                    "Latest": [
+                        {"Name": ch.get("Name", "Unknown"),
+                         "Program": (ch.get("CurrentProgram") or {}).get("Name", "Off air")}
+                        for ch in channels.get("Items", [])
+                    ],
+                }
+
+            types = LIBRARY_COUNT_TYPES.get(col_type, DEFAULT_COUNT_TYPES)
+            if col_type in LIBRARY_COUNT_TYPES:
+                counts = {}
+                for item_type in types:
+                    resp = await self.client.get_items({
+                        "ParentId": item["Id"], "Recursive": "true",
+                        "IncludeItemTypes": item_type, "Limit": 0,
+                    })
+                    counts[item_type] = resp.get("TotalRecordCount", 0)
+                count = counts[types[0]]
+            else:
+                resp = await self.client.get_items({
+                    "ParentId": item["Id"], "Recursive": "true",
+                    "IncludeItemTypes": ",".join(types), "Limit": 0,
+                })
+                counts = {}
+                count = resp.get("TotalRecordCount", 0)
+
+            latest_types = "Episode" if col_type == "tvshows" else ",".join(types)
+            latest = await self.client.get_items({
+                "ParentId": item["Id"], "Recursive": "true", "Limit": 5,
+                "SortBy": "DateCreated", "SortOrder": "Descending",
+                "IncludeItemTypes": latest_types,
+            })
+            return {**base, "Count": count, "Counts": counts, "Latest": latest.get("Items", [])}
+
+
+class EmbyReleaseCoordinator(DataUpdateCoordinator[list[dict]]):
+    """Emby Server releases from GitHub, used for the update entity."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        super().__init__(
+            hass, _LOGGER, config_entry=entry, name="Emby releases",
+            update_interval=UPDATE_CHECK_INTERVAL,
         )
 
-    async def _async_update_data(self):
+    async def _async_update_data(self) -> list[dict]:
+        session = async_get_clientsession(self.hass)
         try:
-            # 1. Fetch Basic Data
-            sessions = await self.client.api_request("GET", "Sessions")
-            system_info = await self.client.api_request("GET", "System/Info")
-            
-            libraries = []
-            folders = await self.client.get_media_folders()
-            
-            # 2. Process Libraries (Parallelized)
-            if folders and "Items" in folders:
-                tasks = []
-                for item in folders["Items"]:
-                    tasks.append(self._process_library_item(item))
-                
-                results = await asyncio.gather(*tasks)
-                libraries = [lib for lib in results if lib is not None]
+            async with session.get(
+                EMBY_RELEASES_URL, params={"per_page": 20},
+                headers={"Accept": "application/vnd.github+json"}, timeout=15,
+            ) as resp:
+                if resp.status != 200:
+                    raise UpdateFailed(f"GitHub returned {resp.status}")
+                releases = await resp.json()
+        except UpdateFailed:
+            raise
+        except Exception as err:  # pylint: disable=broad-except
+            raise UpdateFailed(f"Could not fetch Emby releases: {type(err).__name__}") from err
+        return [
+            {"version": r["tag_name"], "prerelease": r.get("prerelease", False),
+             "url": r.get("html_url"), "notes": r.get("body") or ""}
+            for r in releases if not r.get("draft")
+        ]
 
-            return {
-                "sessions": sessions or [], 
-                "libraries": libraries,
-                "system_info": system_info or {}
-            }
-            
-        except Exception as err:
-            raise UpdateFailed(f"Error communicating with API: {err}")
 
-    async def _process_library_item(self, item):
-        """Helper to process a single library item."""
-        try:
-            col_type = item.get("CollectionType", "unknown")
-            if col_type == "livetv":
-                channels_resp = await self.client.api_request(
-                    "GET", "LiveTv/Channels", params={"Limit": 30, "EnableImages": "false"} 
-                )
-                channel_data = []
-                if channels_resp and "Items" in channels_resp:
-                    for ch in channels_resp["Items"]:
-                        name = ch.get("Name", "Unknown")
-                        prog = ch.get("CurrentProgram", {}).get("Name", "Off Air")
-                        channel_data.append({"name": name, "program": prog})
+@dataclass
+class EmbyData:
+    """Runtime data stored on the config entry."""
 
-                return {
-                    "Id": item["Id"], "Name": item["Name"], "Type": col_type,
-                    "Count": channels_resp.get("TotalRecordCount", 0) if channels_resp else 0,
-                    "LatestItems": channel_data 
-                }
-            else:
-                count_resp = await self.client.get_items(
-                    params={"ParentId": item["Id"], "Recursive": "true", "IncludeItemTypes": "Movie,Series,Episode,Audio,Video", "Limit": 0}
-                )
-                latest_resp = await self.client.get_items(
-                    params={"ParentId": item["Id"], "Recursive": "true", "Limit": 5, "SortBy": "DateCreated", "SortOrder": "Descending", "IncludeItemTypes": "Movie,Series,Episode,Audio,Video"}
-                )
-                return {
-                    "Id": item["Id"], "Name": item["Name"], "Type": col_type,
-                    "Count": count_resp.get("TotalRecordCount", 0) if count_resp else 0,
-                    "LatestItems": latest_resp.get("Items", []) if latest_resp else []
-                }
-        except Exception as e:
-            _LOGGER.error(f"Error processing library {item.get('Name')}: {e}")
-            return None
-
-    async def async_connect(self) -> None:
-        await self.client.validate_connection()
-        await self.async_config_entry_first_refresh()
-        
-    @callback
-    def setup_global_listeners(self, courtesy_callback):
-        """Register WebSocket listeners directly on the client for global events."""
-        self.client.add_message_listener("ServerShuttingDown", courtesy_callback)
-        self.client.add_message_listener("ServerRestarting", courtesy_callback)
-        
-        # --- NEW: Direct Payload Ingestion (Zero Latency) ---
-        @callback
-        def _handle_sessions_update(data):
-            # The 'Sessions' message contains the full list of sessions in 'Data'.
-            # We can use this directly instead of calling the API.
-            new_sessions = data.get("Data")
-            if new_sessions and isinstance(new_sessions, list):
-                if not self.data: return
-                
-                # Update the data structure immediately
-                self.data["sessions"] = new_sessions
-                
-                # Notify HA listeners (Media Player entities) instantly
-                self.async_set_updated_data(self.data)
-        
-        @callback
-        def _trigger_refresh(data):
-            # For other events (like UserDataChanged) that don't carry the payload,
-            # we still need to fetch.
-            if not self._listeners: return
-            self.hass.async_create_task(self.async_request_refresh())
-
-        # Bind the direct handler to 'Sessions'
-        self.client.add_message_listener("Sessions", _handle_sessions_update)
-        
-        # Bind the refresh handler to others
-        self.client.add_message_listener("UserDataChanged", _trigger_refresh)
+    client: EmbyClient
+    sessions: EmbySessionCoordinator
+    libraries: EmbyLibraryCoordinator
+    releases: EmbyReleaseCoordinator
+    unsubscribers: list = field(default_factory=list)
