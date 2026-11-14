@@ -95,10 +95,11 @@ class EmbyLibraryCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         for item, result in zip(items, results):
             if isinstance(result, dict):
                 libraries[item["Id"]] = result
-            elif item["Id"] in previous:
-                # Keep the last good count rather than dropping to 0.
-                _LOGGER.debug("Library %s failed to refresh: %s", item.get("Name"), result)
-                libraries[item["Id"]] = previous[item["Id"]]
+            else:
+                _LOGGER.warning("Emby library %s failed to refresh: %s", item.get("Name"), result)
+                if item["Id"] in previous:
+                    # Keep the last good count rather than dropping to 0.
+                    libraries[item["Id"]] = previous[item["Id"]]
         return libraries
 
     async def _fetch_library(self, item: dict) -> dict:

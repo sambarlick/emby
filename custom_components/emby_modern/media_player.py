@@ -30,7 +30,7 @@ SUPPORTED = (
     | MediaPlayerEntityFeature.PREVIOUS_TRACK | MediaPlayerEntityFeature.NEXT_TRACK
     | MediaPlayerEntityFeature.BROWSE_MEDIA | MediaPlayerEntityFeature.PLAY_MEDIA
     | MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE
-    | MediaPlayerEntityFeature.VOLUME_STEP
+    | MediaPlayerEntityFeature.VOLUME_STEP | MediaPlayerEntityFeature.TURN_OFF
 )
 
 
@@ -55,6 +55,7 @@ class EmbyMediaPlayer(EmbyClientEntity, MediaPlayerEntity):
         self._position_updated_at: datetime | None = None
         self._last_item: str | None = None
         self._last_paused: bool | None = None
+        self._volume_override: tuple[float, datetime] | None = None
 
     # ---------------- state ----------------
 
@@ -197,6 +198,9 @@ class EmbyMediaPlayer(EmbyClientEntity, MediaPlayerEntity):
 
     @property
     def volume_level(self) -> float | None:
+        # Show a newly set volume straight away; clients take a few seconds to report it.
+        if self._volume_override and (dt_util.utcnow() - self._volume_override[1]).total_seconds() < 5:
+            return self._volume_override[0]
         level = self._play_state.get("VolumeLevel")
         return level / 100 if level is not None else None
 
@@ -236,6 +240,10 @@ class EmbyMediaPlayer(EmbyClientEntity, MediaPlayerEntity):
     async def async_media_stop(self) -> None:
         await self._playstate("Stop")
 
+    async def async_turn_off(self) -> None:
+        """The power button stops playback; Emby can't switch a client off."""
+        await self._playstate("Stop")
+
     async def async_media_next_track(self) -> None:
         await self._playstate("NextTrack")
 
@@ -248,10 +256,10 @@ class EmbyMediaPlayer(EmbyClientEntity, MediaPlayerEntity):
         self.async_write_ha_state()
 
     async def async_set_volume_level(self, volume: float) -> None:
-        await self.client.general_command(
-            self._require_session(), "SetVolume", {"Volume": int(volume * 100)}
-        )
-        await self.coordinator.async_request_refresh()
+        session_id = self._require_session()
+        self._volume_override = (volume, dt_util.utcnow())
+        self.async_write_ha_state()
+        await self.client.general_command(session_id, "SetVolume", {"Volume": int(volume * 100)})
 
     async def async_volume_up(self) -> None:
         await self.client.general_command(self._require_session(), "VolumeUp")

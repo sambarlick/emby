@@ -1,6 +1,7 @@
 """The Emby Modern integration."""
 from __future__ import annotations
 
+import inspect
 import logging
 import re
 
@@ -99,13 +100,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EmbyConfigEntry) -> bool
     _async_cleanup_registry(hass, entry)
 
     # The server device must exist before client devices reference it.
-    info = (data.sessions.data or {}).get("system_info", {})
-    dr.async_get(hass).async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, server_device_id(entry))},
-        manufacturer="Emby", model="Emby Server", name=entry.title,
-        sw_version=info.get("Version"), configuration_url=client.get_server_url(),
-    )
+    _async_register_devices(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -199,7 +194,36 @@ def _async_cleanup_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
         ids = {i[1] for i in device.identifiers if i[0] == DOMAIN}
         if ids and server not in ids and not ids & selected:
-            dev_reg.async_update_device(device.id, remove_config_entry_id=entry.entry_id)
+            dev_reg.async_remove_device(device.id)
+
+
+@callback
+def _async_register_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Create the server device, then each selected client linked to it."""
+    dev_reg = dr.async_get(hass)
+    data: EmbyData = entry.runtime_data
+    info = (data.sessions.data or {}).get("system_info", {})
+    server = dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, server_device_id(entry))},
+        manufacturer="Emby", model="Emby Server", name=entry.title,
+        sw_version=info.get("Version"), configuration_url=data.client.get_server_url(),
+    )
+    # HA 2026.8+ links devices by registry ID; older versions by identifier.
+    link = (
+        {"via_device_id": server.id} if _SUPPORTS_VIA_DEVICE_ID
+        else {"via_device": (DOMAIN, server_device_id(entry))}
+    )
+    for device_id, client_info in selected_clients(hass, entry).items():
+        dev_reg.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, device_id)},
+            manufacturer="Emby", model=client_info.get("app"), name=client_info["name"],
+            **link,
+        )
+
+
+_SUPPORTS_VIA_DEVICE_ID = "via_device_id" in inspect.signature(dr.DeviceRegistry.async_get_or_create).parameters
 
 
 # Object IDs older versions generated that didn't include the device name.

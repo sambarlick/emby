@@ -173,3 +173,29 @@ async def test_websocket_dispatch(hass):
         listener({"MessageType": "Sessions", "Data": []})
     remove()
     assert got and client._listeners["Sessions"] == []
+
+
+async def test_no_repairs_for_uncontrollable_clients(hass, entry, fake_emby):
+    fake_emby.sessions.append({"Id": "s-ha", "DeviceId": "dev-ha", "DeviceName": "HomeAssistant",
+                               "Client": "pyEmby", "SupportsRemoteControl": False})
+    await setup(hass, entry)
+    issues = ir.async_get(hass).issues
+    assert (DOMAIN, f"new_client_{entry.entry_id}_dev-ha") not in issues
+
+
+async def test_volume_is_immediate_and_turn_off_stops(hass, entry, fake_emby):
+    await setup(hass, entry)
+    await hass.services.async_call("media_player", "volume_set",
+        {"entity_id": "media_player.lounge_tv", "volume_level": 0.7}, blocking=True)
+    assert hass.states.get("media_player.lounge_tv").attributes["volume_level"] == 0.7
+    await hass.services.async_call("media_player", "turn_off", {"entity_id": "media_player.lounge_tv"}, blocking=True)
+    assert ("POST", "Sessions/sess-lounge-1/Playing/Stop", None, None) in fake_emby.calls
+
+
+async def test_client_devices_linked_to_server(hass, entry, fake_emby):
+    from homeassistant.helpers import device_registry as dr
+    await setup(hass, entry)
+    reg = dr.async_get(hass)
+    server = reg.async_get_device(identifiers={(DOMAIN, entry.unique_id)})
+    lounge = reg.async_get_device(identifiers={(DOMAIN, "dev-lounge")})
+    assert lounge.via_device_id == server.id

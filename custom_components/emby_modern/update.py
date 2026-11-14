@@ -63,6 +63,11 @@ class EmbyServerUpdate(EmbyServerEntity, UpdateEntity):
 
     @property
     def release_summary(self) -> str | None:
+        if not self.system_info.get("CanSelfUpdate"):
+            return (
+                "This server can't install updates itself. Download the new version from "
+                "[emby.media](https://emby.media/download.html) and install it on the server."
+            )
         release = self._release()
         return release["notes"][:250] if release and release["notes"] else None
 

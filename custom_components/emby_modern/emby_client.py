@@ -51,6 +51,7 @@ class EmbyClient:
         self._ws = None
         self._ws_task: asyncio.Task | None = None
         self._listeners: dict[str, list[Callable[[dict], None]]] = {}
+        self.ws_connected = False
 
     # ------------------------------------------------------------------
     # Connection
@@ -104,8 +105,11 @@ class EmbyClient:
                 users = await self.api_request("GET", "Users")
             items = users.get("Items") if isinstance(users, dict) else users
             if items:
-                admins = [u for u in items if u.get("Policy", {}).get("IsAdministrator")]
-                self._user_id = (admins or items)[0]["Id"]
+                # The most recently active admin: their library views are the
+                # ones the owner sees.
+                admins = [u for u in items if u.get("Policy", {}).get("IsAdministrator")] or items
+                admins.sort(key=lambda u: u.get("LastActivityDate") or "", reverse=True)
+                self._user_id = admins[0]["Id"]
                 return
             sessions = await self.api_request("GET", "Sessions")
             for sess in sessions or []:
@@ -276,7 +280,8 @@ class EmbyClient:
             try:
                 async with self._session.ws_connect(self._ws_url, heartbeat=30) as ws:
                     self._ws = ws
-                    _LOGGER.debug("Connected to Emby WebSocket")
+                    self.ws_connected = True
+                    _LOGGER.info("Connected to Emby WebSocket at %s", self.host)
                     # Ask for session updates: first after 0 ms, then every 1500 ms.
                     await ws.send_json({"MessageType": "SessionsStart", "Data": "0,1500"})
                     async for msg in ws:
@@ -296,6 +301,11 @@ class EmbyClient:
                 raise
             except Exception as err:  # pylint: disable=broad-except
                 # Log the type only: the URL in the message contains the API key.
-                _LOGGER.debug("Emby WebSocket connection lost (%s)", type(err).__name__)
+                log = _LOGGER.warning if self.ws_connected else _LOGGER.debug
+                log("Emby WebSocket unavailable (%s), retrying", type(err).__name__)
+            else:
+                if self.ws_connected:
+                    _LOGGER.warning("Emby WebSocket closed, reconnecting")
+            self.ws_connected = False
             self._ws = None
             await asyncio.sleep(WS_RECONNECT_DELAY)

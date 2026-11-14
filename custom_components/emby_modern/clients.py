@@ -76,6 +76,11 @@ def async_flag_new_clients(hass: HomeAssistant, entry: ConfigEntry, sessions: li
         device_id = sess.get("DeviceId")
         if not device_id or device_id in OWN_DEVICE_IDS or device_id in selected or device_id in seen:
             continue
+        # Integrations and tools (Home Assistant, Music Assistant, Infuse)
+        # can't be controlled, so they aren't offered as devices.
+        if not sess.get("SupportsRemoteControl"):
+            ir.async_delete_issue(hass, DOMAIN, issue_id(entry, device_id))  # from beta 1
+            continue
         seen.add(device_id)
         name = sess.get("DeviceName") or device_id
         ir.async_create_issue(

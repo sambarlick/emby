@@ -30,4 +30,5 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry) -> dict
             for lib in (data.libraries.data or {}).values()
         ],
         "release_check_ok": data.releases.last_update_success,
+        "websocket_connected": data.client.ws_connected,
     }, TO_REDACT)

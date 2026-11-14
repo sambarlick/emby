@@ -55,7 +55,6 @@ class EmbyClientEntity(CoordinatorEntity):
             manufacturer="Emby",
             model=app_name,
             name=device_name,
-            via_device=(DOMAIN, server_id),
         )
 
     @property
