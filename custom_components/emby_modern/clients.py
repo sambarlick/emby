@@ -12,8 +12,14 @@ from .emby_client import EmbyClient
 
 _LOGGER = logging.getLogger(__name__)
 
-# The WebSocket connection this integration opens shows up as a device.
+# Home Assistant's own connections show up in Emby as clients. They aren't
+# playback devices, so they're never offered.
 OWN_DEVICE_IDS = {"homeassistant"}
+OWN_CLIENT_APPS = {"Emby_Modern (HA)", "Home Assistant", "pyEmby"}
+
+
+def _is_own(device_id: str | None, app: str | None, server_id: str | None) -> bool:
+    return not device_id or device_id in OWN_DEVICE_IDS or device_id == server_id or app in OWN_CLIENT_APPS
 
 
 def selected_clients(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, dict]:
@@ -21,7 +27,7 @@ def selected_clients(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, dict]
     return dict(entry.options.get(CONF_CLIENTS, {}))
 
 
-async def async_known_clients(client: EmbyClient) -> dict[str, dict]:
+async def async_known_clients(client: EmbyClient, server_id: str | None = None) -> dict[str, dict]:
     """Every client Emby knows about, connected or not.
 
     Active sessions come first because their DeviceId is what playback uses.
@@ -30,7 +36,7 @@ async def async_known_clients(client: EmbyClient) -> dict[str, dict]:
     known: dict[str, dict] = {}
     for sess in await client.get_sessions():
         device_id = sess.get("DeviceId")
-        if device_id and device_id not in OWN_DEVICE_IDS:
+        if not _is_own(device_id, sess.get("Client"), server_id) and device_id not in known:
             known[device_id] = {
                 "name": sess.get("DeviceName") or device_id,
                 "app": sess.get("Client"),
@@ -42,7 +48,7 @@ async def async_known_clients(client: EmbyClient) -> dict[str, dict]:
         devices = []
     for dev in devices:
         device_id = dev.get("ReportedDeviceId") or dev.get("Id")
-        if device_id and device_id not in OWN_DEVICE_IDS and device_id not in known:
+        if not _is_own(device_id, dev.get("AppName"), server_id) and device_id not in known:
             known[device_id] = {
                 "name": dev.get("Name") or device_id,
                 "app": dev.get("AppName"),
@@ -74,7 +80,7 @@ def async_flag_new_clients(hass: HomeAssistant, entry: ConfigEntry, sessions: li
     selected = selected_clients(hass, entry)
     for sess in sessions:
         device_id = sess.get("DeviceId")
-        if not device_id or device_id in OWN_DEVICE_IDS or device_id in selected or device_id in seen:
+        if _is_own(device_id, sess.get("Client"), entry.unique_id) or device_id in selected or device_id in seen:
             continue
         # Integrations and tools (Home Assistant, Music Assistant, Infuse)
         # can't be controlled, so they aren't offered as devices.

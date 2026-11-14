@@ -185,7 +185,9 @@ def _async_cleanup_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove per-session entities from older versions and deselected clients."""
     ent_reg = er.async_get(hass)
     for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
-        if ent.unique_id.startswith(("remote-", "kill-")):
+        # Per-session entities from older versions, and a media player older
+        # versions made for Home Assistant's own connection to Emby.
+        if ent.unique_id.startswith(("remote-", "kill-")) or ent.unique_id == f"{server_device_id(entry)}-{server_device_id(entry)}":
             ent_reg.async_remove(ent.entity_id)
 
     selected = set(selected_clients(hass, entry))

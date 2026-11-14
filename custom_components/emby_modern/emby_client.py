@@ -222,7 +222,8 @@ class EmbyClient:
     async def general_command(self, session_id: str, name: str, arguments: dict | None = None) -> None:
         body: dict[str, Any] = {"Name": name}
         if arguments:
-            body["Arguments"] = arguments
+            # Emby expects argument values as strings ({"Volume": "40"}).
+            body["Arguments"] = {k: str(v) for k, v in arguments.items()}
         await self.api_request("POST", f"Sessions/{session_id}/Command", json_data=body)
 
     async def play(self, session_id: str, item_ids: str, command: str = "PlayNow") -> None:

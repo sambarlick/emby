@@ -199,3 +199,16 @@ async def test_client_devices_linked_to_server(hass, entry, fake_emby):
     server = reg.async_get_device(identifiers={(DOMAIN, entry.unique_id)})
     lounge = reg.async_get_device(identifiers={(DOMAIN, "dev-lounge")})
     assert lounge.via_device_id == server.id
+
+
+async def test_volume_args_are_strings_and_own_clients_hidden(hass, entry, fake_emby):
+    fake_emby.sessions.append({"Id": "s-own", "DeviceId": entry.unique_id, "DeviceName": "HomeAssistant",
+                               "Client": "Emby_Modern (HA)", "SupportsRemoteControl": False})
+    await setup(hass, entry)
+    await hass.services.async_call("media_player", "volume_set",
+        {"entity_id": "media_player.lounge_tv", "volume_level": 0.4}, blocking=True)
+    assert ("POST", "Sessions/sess-lounge-1/Command", None,
+            {"Name": "SetVolume", "Arguments": {"Volume": "40"}}) in fake_emby.calls
+    r = await hass.config_entries.options.async_init(entry.entry_id)
+    values = [o["value"] for o in r["data_schema"].schema["clients"].config["options"]]
+    assert entry.unique_id not in values

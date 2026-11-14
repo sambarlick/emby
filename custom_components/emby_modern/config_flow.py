@@ -150,7 +150,7 @@ class EmbyConfigFlow(ConfigFlow, domain=DOMAIN):
             clients = _selected_to_options(user_input.get(CONF_CLIENTS, []), self._known, {})
             return self.async_create_entry(title=self._title, data=self._data, options={CONF_CLIENTS: clients})
         try:
-            self._known = await async_known_clients(_client(self.hass, self._data))
+            self._known = await async_known_clients(_client(self.hass, self._data), self.unique_id)
         except Exception:  # pylint: disable=broad-except
             self._known = {}
         return self.async_show_form(step_id="clients", data_schema=_clients_schema(self._known, {}))
@@ -242,7 +242,7 @@ class EmbyOptionsFlow(OptionsFlow):
             clients = _selected_to_options(user_input.get(CONF_CLIENTS, []), self._known, previous)
             return self.async_create_entry(data={**self.config_entry.options, CONF_CLIENTS: clients})
         try:
-            self._known = await async_known_clients(self.config_entry.runtime_data.client)
+            self._known = await async_known_clients(self.config_entry.runtime_data.client, self.config_entry.unique_id)
         except Exception:  # pylint: disable=broad-except
             self._known = {}
         return self.async_show_form(step_id="init", data_schema=_clients_schema(self._known, previous))
