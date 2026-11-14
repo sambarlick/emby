@@ -21,7 +21,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry) -> dict
         "system_info": (data.sessions.data or {}).get("system_info", {}),
         "sessions": [
             {k: s.get(k) for k in ("DeviceId", "DeviceName", "Client", "ApplicationVersion",
-                                   "SupportsRemoteControl", "PlayState", "DeviceType")}
+                                   "SupportsRemoteControl", "SupportedCommands", "PlayState", "DeviceType")}
             | {"NowPlayingType": (s.get("NowPlayingItem") or {}).get("Type")}
             for s in sessions
         ],

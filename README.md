@@ -24,14 +24,21 @@ This integration focuses on stability, connection resilience and modern Home Ass
 * **📊 Library sensors:** Item counts per library (series and episodes counted separately), with recently added items. They refresh when Emby reports a library change.
 * **⬆️ Server updates:** The standard Home Assistant update entity shows new Emby Server releases. Install is offered on servers that can update themselves.
 * **🔘 Server controls:** Restart and Scan Library buttons, plus Shutdown (disabled by default).
-* **🔔 Shutdown Courtesy Mode:** Warns viewers before the server restarts or shuts down.
+* **🔔 Shutdown Courtesy Mode:** Warns viewers with a pop-up before the server restarts or shuts down.
 * **🔒 Re-authentication:** If Emby stops accepting the API key, Home Assistant asks for a new one.
 * **🩺 Diagnostics:** Download a debug file with secrets removed.
 
 ## ⚠️ Known Limitations
 
+* **Volume control** depends on the Emby app. Some apps can't change volume when audio goes to a soundbar or AV receiver, so the slider may move without changing the sound. Mute usually still works.
 * **Media sidebar playback** needs your browser to reach the Emby server directly, and Emby transcodes the stream.
 * **Server updates** can't be installed from Home Assistant on Linux service, Docker or LXC installs. Emby can't update itself there, so the update entity only shows the new version.
+* **Stop button:** Home Assistant's media card doesn't show Stop for players that can pause. Use the power button to stop playback.
+
+## 🗺️ Roadmap
+
+* Paging in the media browser for very large libraries.
+* Submission to the Home Assistant Marketplace's default catalogue.
 
 ## 📥 Installation
 
@@ -64,6 +71,11 @@ On Home Assistant 2026.10 or earlier, add this repository as a custom repository
 Emby often creates a new client for each browser or app reinstall. To change which ones are in Home Assistant, go to **Settings** -> **Devices & Services** -> **Emby (Modern)** and click the **settings cog**. Unticking a client removes its device.
 
 Remote and Stop Session entities are created for each client but disabled by default. Enable them on the device page if you use them.
+
+### Shutdown Courtesy Mode
+Turn on the **Shutdown Courtesy Mode** switch on the server device. When Emby is about to restart or shut down, every connected client that supports messages gets a pop-up warning viewers that playback will be interrupted. The switch remembers its setting across restarts.
+
+To send your own messages, use the `emby_modern.send_message` action.
 
 ### Changing the server address
 If your Emby server's IP address, port or API key changes, you don't need to remove the integration:

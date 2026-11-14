@@ -127,7 +127,18 @@ class EmbyMediaPlayer(EmbyClientEntity, MediaPlayerEntity):
 
     @property
     def supported_features(self) -> MediaPlayerEntityFeature:
-        return SUPPORTED
+        """Hide volume controls the client says it can't do."""
+        commands = self.session.get("SupportedCommands")
+        if not commands:
+            return SUPPORTED
+        features = SUPPORTED
+        if "SetVolume" not in commands:
+            features &= ~MediaPlayerEntityFeature.VOLUME_SET
+        if "VolumeUp" not in commands:
+            features &= ~MediaPlayerEntityFeature.VOLUME_STEP
+        if "Mute" not in commands and "ToggleMute" not in commands:
+            features &= ~MediaPlayerEntityFeature.VOLUME_MUTE
+        return features
 
     @property
     def icon(self) -> str:
