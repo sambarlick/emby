@@ -12,27 +12,26 @@
 
 A robust, modern integration for Emby Media Server, designed to replace the legacy built-in integration.
 
-This integration focuses on stability, connection resilience, and using modern Home Assistant architecture (DataUpdateCoordinators) to ensure your entities state stays in sync with your server.
+This integration focuses on stability, connection resilience and modern Home Assistant architecture, with live updates over Emby's WebSocket.
 
 ## ✨ Features
 
-* **⚡ ZeroConf Discovery:** Automatically finds your Emby server on the network—no manual IP entry required.
-* **🚀 Data Update Coordinator:** Uses efficient polling to keep server availability and library status in sync without overloading Home Assistant.
-* **🔒 Authentication:** Proper handling of Emby API Keys and User Sessions.
-* **🎥 Media Players:** Controls for all your Emby sessions with artwork support.
-* **📊 Library Statistics:** Real-time sensors for Movie, Series, and Episode counts.
-* **🔘 Server Controls:** Dedicated buttons to **Restart Server** and **Scan Library** directly from Home Assistant.
-* **🎮 Remote Control:** Control your Emby clients directly.
-* **🔘 Buttons:** Trigger server tasks instantly.
-* **🛠️ Robustness:** Handles server restarts and connection drops gracefully.
+* **⚡ Discovery:** Finds your Emby server on the network automatically (SSDP).
+* **📺 You choose the clients:** Pick which Emby apps and devices appear in Home Assistant. Selected clients stay put and show as Off when idle. When a new client connects, a Repairs notice offers to add it.
+* **🎥 Media players:** Play, pause, seek, volume, artwork and progress, updated live.
+* **📂 Media browser:** Browse your libraries from any Emby media player and send media to it.
+* **🎬 Media sidebar:** Browse and play Emby libraries in Home Assistant's Media panel. Emby transcodes for the browser.
+* **📊 Library sensors:** Item counts per library (series and episodes counted separately), with recently added items. They refresh when Emby reports a library change.
+* **⬆️ Server updates:** The standard Home Assistant update entity shows new Emby Server releases. Install is offered on servers that can update themselves.
+* **🔘 Server controls:** Restart and Scan Library buttons, plus Shutdown (disabled by default).
+* **🔔 Shutdown Courtesy Mode:** Warns viewers before the server restarts or shuts down.
+* **🔒 Re-authentication:** If Emby stops accepting the API key, Home Assistant asks for a new one.
+* **🩺 Diagnostics:** Download a debug file with secrets removed.
 
-## ⚠️ Known Limitations & Roadmap
+## ⚠️ Known Limitations
 
-* **Latency:** This integration uses local polling. State updates (Play/Pause) may take a few seconds to reflect in Home Assistant.
-* **Active Platforms:** Media Player, Sensor, Button, Remote.
-* **Future Plans:**
-    * Re-introduce Browse Media (v2.0).
-    * WebSocket implementation for instant updates (v2.0).
+* **Media sidebar playback** needs your browser to reach the Emby server directly, and Emby transcodes the stream.
+* **Server updates** can't be installed from Home Assistant on Linux service, Docker or LXC installs. Emby can't update itself there, so the update entity only shows the new version.
 
 ## 📥 Installation
 
@@ -59,6 +58,12 @@ On Home Assistant 2026.10 or earlier, add this repository as a custom repository
 2.  If your server is on the same network, it should be discovered automatically! Click **Configure**.
 3.  If not discovered, click **Add Integration** and search for **Emby (Modern)**.
 4.  Enter your Host (IP) and API Key.
+5.  Tick the Emby clients you want as devices.
+
+### Choosing Emby clients
+Emby often creates a new client for each browser or app reinstall. To change which ones are in Home Assistant, go to **Settings** -> **Devices & Services** -> **Emby (Modern)** and click the **settings cog**. Unticking a client removes its device.
+
+Remote and Stop Session entities are created for each client but disabled by default. Enable them on the device page if you use them.
 
 ### Changing the server address
 If your Emby server's IP address, port or API key changes, you don't need to remove the integration:
