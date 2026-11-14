@@ -103,7 +103,9 @@ async def test_repair_adds_client(hass, entry, fake_emby):
     issue = ir.async_get(hass).async_get_issue(DOMAIN, f"new_client_{entry.entry_id}_dev-firefox-1")
     flow = await async_create_fix_flow(hass, issue.issue_id, issue.data)
     flow.hass = hass
-    await flow.async_step_confirm({})
+    menu = await flow.async_step_init()
+    assert menu["menu_options"] == ["add", "ignore"]
+    await flow.async_step_add()
     await hass.async_block_till_done()
     assert "dev-firefox-1" in entry.options[CONF_CLIENTS]
     assert hass.states.get("media_player.firefox") is not None
@@ -212,3 +214,16 @@ async def test_volume_args_are_strings_and_own_clients_hidden(hass, entry, fake_
     r = await hass.config_entries.options.async_init(entry.entry_id)
     values = [o["value"] for o in r["data_schema"].schema["clients"].config["options"]]
     assert entry.unique_id not in values
+
+
+async def test_repair_ignore(hass, entry, fake_emby):
+    await setup(hass, entry)
+    from custom_components.emby_modern.repairs import async_create_fix_flow
+    issue_id = f"new_client_{entry.entry_id}_dev-firefox-1"
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    flow = await async_create_fix_flow(hass, issue_id, issue.data)
+    flow.hass = hass
+    result = await flow.async_step_ignore()
+    assert result["reason"] == "ignored"
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id).dismissed_version is not None
+    assert "dev-firefox-1" not in entry.options[CONF_CLIENTS]

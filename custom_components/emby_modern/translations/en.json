@@ -80,10 +80,21 @@
       "title": "New Emby client: {name}",
       "fix_flow": {
         "step": {
+          "init": {
+            "title": "New Emby client: {name}",
+            "description": "{name} ({app}) connected to your Emby server but isn't in Home Assistant.",
+            "menu_options": {
+              "add": "Add to Home Assistant",
+              "ignore": "Ignore this client"
+            }
+          },
           "confirm": {
             "title": "Add {name}?",
-            "description": "{name} ({app}) connected to {server} but isn't in Home Assistant. Submit to add it as a device, or choose Ignore to stop seeing this notice."
+            "description": "Submit to add {name} as a device."
           }
+        },
+        "abort": {
+          "ignored": "{name} won't be added. You can still add it later under the integration's settings cog."
         }
       }
     }
